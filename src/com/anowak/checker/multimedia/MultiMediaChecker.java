@@ -6,7 +6,9 @@
 package com.anowak.checker.multimedia;
 
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.file.FileSystem;
 import java.nio.file.FileSystems;
 import java.nio.file.FileVisitResult;
@@ -16,6 +18,9 @@ import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.SimpleFileVisitor;
 import java.nio.file.attribute.BasicFileAttributes;
+import java.security.MessageDigest;
+import java.security.Provider;
+import java.security.Security;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.logging.Level;
@@ -38,6 +43,7 @@ import javafx.scene.control.TableView;
 import javafx.scene.control.TextField;
 import javafx.scene.layout.AnchorPane;
 import javafx.scene.layout.HBox;
+import javafx.scene.layout.Priority;
 import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
 import javafx.stage.DirectoryChooser;
@@ -60,6 +66,14 @@ public class MultiMediaChecker extends Application {
     private Stage stage;
     Scene scene;
 
+    /**
+     * Main function of this calls. Will lunch JavaFX
+     *
+     * @param args First optional argument can define root directory for check
+     * run.
+     *
+     * @throws Exception
+     */
     static public void main(String[] args) throws Exception {
         if (args.length != 1) {
             logger.severe("Usage: java com.anowak.checker.audio.Mp3Checker <mp3file>");
@@ -68,6 +82,12 @@ public class MultiMediaChecker extends Application {
         Application.launch(args);
     }
 
+    /**
+     * Entry method upon start JavaFX app.
+     *
+     * @param primaryStage top-level stage
+     * @throws Exception
+     */
     @Override
     public void start(Stage primaryStage) throws Exception {
         logger.setLevel(Level.FINEST);
@@ -84,13 +104,17 @@ public class MultiMediaChecker extends Application {
         statusBar.setMaxWidth(Double.MAX_VALUE);
         statusBar.setText("Root Dir: " + rootDir.toString());
 
-
         Button startButton = new Button("Start");
         startButton.setOnAction(new EventHandler<ActionEvent>() {
 
             @Override
             public void handle(ActionEvent event) {
                 statusBar.setText("Searching dir: " + dirField.getText() + " ...");
+                try {
+                    navigateDirs();
+                } catch (IOException e) {
+                    logger.log(Level.SEVERE, "IOException caught: ", e);
+                }
             }
         });
 
@@ -116,7 +140,6 @@ public class MultiMediaChecker extends Application {
                     statusBar.setText("New root dir: " + rootDir.toString());
                     printSizes("statusBar", statusBar);
                     printSizes("dirField", dirField);
-
                 } catch (IOException e) {
                     logger.log(Level.SEVERE, "Error with selected dir: " + dir.getAbsolutePath(), e);
                 }
@@ -128,39 +151,23 @@ public class MultiMediaChecker extends Application {
         dirField.setMinWidth(400);
 
         HBox controls = new HBox();
+        HBox.setHgrow(dirField, Priority.ALWAYS);
         controls.getChildren().addAll(startButton, dirField, dirButton);
         controls.setSpacing(10);
 
         table = new TableView<MediaFile>();
 
         VBox vbox = new VBox(3);
+        VBox.setVgrow(table, Priority.ALWAYS);
         vbox.getChildren().addAll(controls, table, statusBar);
-
-        //   vbox.setSpacing(10);
-//        logger.info("vbox.fillWidthProperty="+vbox.fillWidthProperty());
 
         AnchorPane pane = new AnchorPane();
         AnchorPane.setTopAnchor(vbox, 10.0);
         AnchorPane.setLeftAnchor(vbox, 10.0);
         AnchorPane.setRightAnchor(vbox, 10.0);
         AnchorPane.setBottomAnchor(vbox, 10.0);
-        AnchorPane.setLeftAnchor(controls, 10.0);
-        AnchorPane.setRightAnchor(controls, 10.0);
 
         pane.getChildren().addAll(vbox);
-
-//        AnchorPane anchorpane = new AnchorPane();
-     // List should stretch as anchorpane is resized
-//     ListView list = new ListView();
-//     AnchorPane.setTopAnchor(list, 10.0);
-//     AnchorPane.setLeftAnchor(list, 10.0);
-//     AnchorPane.setRightAnchor(list, 65.0);
-//     AnchorPane.setBottomAnchor(list, 10.0);
-//     // Button will float on right edge
-//     Button button = new Button("Add");
-//     AnchorPane.setTopAnchor(button, 10.0);
-//     AnchorPane.setRightAnchor(button, 10.0);
-//     anchorpane.getChildren().addAll(list, button);
 
         scene = new Scene(pane);
 
@@ -171,7 +178,6 @@ public class MultiMediaChecker extends Application {
         this.stage = primaryStage;
 
         dirField.setMinWidth(300);
-        dirField.setMaxWidth(Double.MAX_VALUE);
 
         printSizes("statusBar", statusBar);
         printSizes("dirField", dirField);
@@ -193,7 +199,6 @@ public class MultiMediaChecker extends Application {
     private void navigateDirs() throws IOException {
         ObservableList<MediaFile> mediaFiles = getMultiMediaFiles();
         table.setItems(mediaFiles);
-
     }
 
     private ObservableList<MediaFile> getMultiMediaFiles() throws IOException {
@@ -202,6 +207,13 @@ public class MultiMediaChecker extends Application {
     }
 
     private List<MediaFile> getFileList() throws IOException {
+        logger.info("Getting list of files ...");
+        
+        Provider[] providers = Security.getProviders();
+        for (Provider p : providers ) {
+            System.out.println(p.getName() + " : " + p.getInfo());
+        }
+        
         List<MediaFile> files = new ArrayList<>();
         files.add(new MediaFile(rootDir));
 
@@ -213,7 +225,7 @@ public class MultiMediaChecker extends Application {
                 + " directories " + pf.getNumberProcessedFiles() + " files");
         logger.info("======================================================");
 
-        statusBar.setText("" + pf.getNumberProcessedDirectories() + " dirs, " + pf.getNumberProcessedFiles() + " files");
+        statusBar.setText("DONE! " + pf.getNumberProcessedDirectories() + " dirs, " + pf.getNumberProcessedFiles() + " files");
         return files;
     }
 
@@ -263,8 +275,9 @@ public class MultiMediaChecker extends Application {
                 System.out.format("Other: %s ", file);
             }
             String contentType = Files.probeContentType(file);
-            System.out.println("(" + attr.size() + " bytes) "
+            System.out.print("(" + attr.size() + " bytes) "
                     + "Type: " + ((contentType == null) ? "unknown" : contentType));
+            System.out.print(" MD5="+checksum(file.toFile()) + "\n");
             nFiles++;
             return CONTINUE;
         }
@@ -300,6 +313,37 @@ public class MultiMediaChecker extends Application {
                 IOException exc) {
             System.err.println(exc);
             return CONTINUE;
+        }
+    }
+
+    static public String checksum(File file) {
+        try {
+            java.security.MessageDigest md5er;
+            try (InputStream fin = new FileInputStream(file)) {
+                md5er = MessageDigest.getInstance("HMAC");  // MD5, or CRC32
+                byte[] buffer = new byte[1024];
+                int read;
+                do {
+                    read = fin.read(buffer);
+                    if (read > 0) {
+                        md5er.update(buffer, 0, read);
+                    }
+                } while (read != -1);
+            }
+            byte[] digest = md5er.digest();
+            if (digest == null) {
+                return null;
+            }
+            String strDigest = "0x";
+            for (int i = 0; i < digest.length; i++) {
+                strDigest += Integer.toString((digest[i] & 0xff)
+                        + 0x100, 16).substring(1).toUpperCase();
+            }
+            return strDigest;
+        } catch (Exception e) {
+            System.out.println("Error:");
+            e.printStackTrace();
+            return null;
         }
     }
 }
