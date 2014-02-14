@@ -26,6 +26,10 @@ import java.util.List;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import javafx.application.Application;
+import javafx.beans.property.IntegerProperty;
+import javafx.beans.property.LongProperty;
+import javafx.beans.property.SimpleIntegerProperty;
+import javafx.beans.property.SimpleLongProperty;
 import javafx.beans.property.SimpleStringProperty;
 import javafx.beans.property.StringProperty;
 import javafx.collections.FXCollections;
@@ -39,8 +43,10 @@ import javafx.scene.control.Button;
 import javafx.scene.control.Control;
 import javafx.scene.control.Label;
 import javafx.scene.control.ListView;
+import javafx.scene.control.TableColumn;
 import javafx.scene.control.TableView;
 import javafx.scene.control.TextField;
+import javafx.scene.control.cell.PropertyValueFactory;
 import javafx.scene.layout.AnchorPane;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
@@ -65,6 +71,7 @@ public class MultiMediaChecker extends Application {
     TextField dirField = new TextField();
     private Stage stage;
     Scene scene;
+    ObservableList<MediaFile> data = FXCollections.observableArrayList();
 
     /**
      * Main function of this calls. Will lunch JavaFX
@@ -120,7 +127,6 @@ public class MultiMediaChecker extends Application {
 
         Button dirButton = new Button("...");
         dirButton.setOnAction(new EventHandler<ActionEvent>() {
-
             @Override
             public void handle(ActionEvent event) {
                 System.out.println("Logger Level: " + logger.getLevel());
@@ -155,7 +161,7 @@ public class MultiMediaChecker extends Application {
         controls.getChildren().addAll(startButton, dirField, dirButton);
         controls.setSpacing(10);
 
-        table = new TableView<MediaFile>();
+        configureTable();
 
         VBox vbox = new VBox(3);
         VBox.setVgrow(table, Priority.ALWAYS);
@@ -177,8 +183,6 @@ public class MultiMediaChecker extends Application {
 
         this.stage = primaryStage;
 
-        dirField.setMinWidth(300);
-
         printSizes("statusBar", statusBar);
         printSizes("dirField", dirField);
 
@@ -197,25 +201,15 @@ public class MultiMediaChecker extends Application {
     }
 
     private void navigateDirs() throws IOException {
-        ObservableList<MediaFile> mediaFiles = getMultiMediaFiles();
-        table.setItems(mediaFiles);
-    }
-
-    private ObservableList<MediaFile> getMultiMediaFiles() throws IOException {
-        ObservableList<MediaFile> mediaFiles = FXCollections.observableList(getFileList());
-        return mediaFiles;
-    }
-
-    private List<MediaFile> getFileList() throws IOException {
         logger.info("Getting list of files ...");
-        
+
+        data.clear();
+        table.setItems(data);
+
         Provider[] providers = Security.getProviders();
-        for (Provider p : providers ) {
+        for (Provider p : providers) {
             System.out.println(p.getName() + " : " + p.getInfo());
         }
-        
-        List<MediaFile> files = new ArrayList<>();
-        files.add(new MediaFile(rootDir));
 
         PrintFiles pf = new PrintFiles();
         Files.walkFileTree(rootDir, pf);
@@ -226,7 +220,7 @@ public class MultiMediaChecker extends Application {
         logger.info("======================================================");
 
         statusBar.setText("DONE! " + pf.getNumberProcessedDirectories() + " dirs, " + pf.getNumberProcessedFiles() + " files");
-        return files;
+
     }
 
     private void printSizes(String name, Control control) {
@@ -237,9 +231,33 @@ public class MultiMediaChecker extends Application {
                 + " prefWidth=" + control.getPrefWidth());
     }
 
-    private static class MediaFile {
+    private void configureTable() {
+        table = new TableView<MediaFile>();
 
-        private StringProperty fileName;
+        TableColumn<MediaFile, String> colFileName = new TableColumn<>("Filename");
+        colFileName.setPrefWidth(400);
+        colFileName.setCellValueFactory(new PropertyValueFactory<MediaFile, String>("fileName"));
+
+        TableColumn<MediaFile, Long> colSize = new TableColumn<>("Size");
+        colSize.setCellValueFactory(new PropertyValueFactory<MediaFile, Long>("size"));
+
+        TableColumn<MediaFile, String> colChecksum = new TableColumn<>("Checksum");
+        colChecksum.setPrefWidth(80);
+        colChecksum.setCellValueFactory(new PropertyValueFactory("checksum"));
+
+        TableColumn<MediaFile, String> colType = new TableColumn<>("Type");
+        colType.setCellValueFactory(new PropertyValueFactory<MediaFile, String>("fileType"));
+
+        table.getColumns().addAll(colFileName, colType, colChecksum, colSize);
+    
+    }
+
+    public static class MediaFile {
+
+        public SimpleStringProperty fileName = new SimpleStringProperty();
+        public SimpleStringProperty fileType = new SimpleStringProperty();
+        public SimpleStringProperty checksum = new SimpleStringProperty();
+        public SimpleLongProperty   size     = new SimpleLongProperty();
 
         public MediaFile() {
         }
@@ -252,9 +270,47 @@ public class MultiMediaChecker extends Application {
             this.fileName = new SimpleStringProperty(file.toString());
         }
 
+        public MediaFile(Path file, long size, String checkSum, String fileType) {
+            setFileName(file.toString());
+            setSize(size);
+            setChecksum(checkSum);
+            setFileType(fileType);
+        }
+
+        public String getFileName() {
+            return this.fileName.get();
+        }
+
+        public void setFileName(String fileName) {
+            this.fileName.set(fileName);
+        }
+
+        public String getFileType() {
+            return fileType.get();
+        }
+
+        public void setFileType(String fileType) {
+            this.fileType.set(fileType);
+        }
+
+        public String getChecksum() {
+            return this.checksum.get();
+        }
+
+        public void setChecksum(String checksum) {
+            this.checksum.set(checksum);
+        }
+
+        public Long getSize() {
+            return size.get();
+        }
+
+        public void setSize(long size) {
+            this.size.set(size);
+        }
     }
 
-    private static class PrintFiles extends SimpleFileVisitor<Path> {
+    private class PrintFiles extends SimpleFileVisitor<Path> {
 
         private int nFiles = 0;
         private int nDirs = 0;
@@ -275,9 +331,14 @@ public class MultiMediaChecker extends Application {
                 System.out.format("Other: %s ", file);
             }
             String contentType = Files.probeContentType(file);
+            String checkSum = checksum(file.toFile());
             System.out.print("(" + attr.size() + " bytes) "
                     + "Type: " + ((contentType == null) ? "unknown" : contentType));
-            System.out.print(" MD5="+checksum(file.toFile()) + "\n");
+            System.out.print(" MD5=" + checkSum + "\n");
+
+            MediaFile media = new MediaFile(file, attr.size(), checkSum, contentType);
+            data.add(media);
+
             nFiles++;
             return CONTINUE;
         }
@@ -320,7 +381,7 @@ public class MultiMediaChecker extends Application {
         try {
             java.security.MessageDigest md5er;
             try (InputStream fin = new FileInputStream(file)) {
-                md5er = MessageDigest.getInstance("HMAC");  // MD5, or CRC32
+                md5er = MessageDigest.getInstance("MD5");  // MD5, or CRC32
                 byte[] buffer = new byte[1024];
                 int read;
                 do {
