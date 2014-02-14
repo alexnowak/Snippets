@@ -12,7 +12,7 @@ import java.io.InputStream;
 import java.nio.file.FileSystem;
 import java.nio.file.FileSystems;
 import java.nio.file.FileVisitResult;
-import static java.nio.file.FileVisitResult.*;
+import static java.nio.file.FileVisitResult.CONTINUE;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
@@ -21,28 +21,20 @@ import java.nio.file.attribute.BasicFileAttributes;
 import java.security.MessageDigest;
 import java.security.Provider;
 import java.security.Security;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import javafx.application.Application;
-import javafx.beans.property.IntegerProperty;
-import javafx.beans.property.LongProperty;
-import javafx.beans.property.SimpleIntegerProperty;
 import javafx.beans.property.SimpleLongProperty;
 import javafx.beans.property.SimpleStringProperty;
-import javafx.beans.property.StringProperty;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
 import javafx.event.ActionEvent;
 import javafx.event.EventHandler;
-import javafx.geometry.Insets;
-import javafx.scene.Group;
 import javafx.scene.Scene;
 import javafx.scene.control.Button;
 import javafx.scene.control.Control;
 import javafx.scene.control.Label;
-import javafx.scene.control.ListView;
 import javafx.scene.control.TableColumn;
 import javafx.scene.control.TableView;
 import javafx.scene.control.TextField;
@@ -50,10 +42,8 @@ import javafx.scene.control.cell.PropertyValueFactory;
 import javafx.scene.layout.AnchorPane;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
-import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
 import javafx.stage.DirectoryChooser;
-import javafx.stage.FileChooser;
 import javafx.stage.Stage;
 
 /**
@@ -204,7 +194,6 @@ public class MultiMediaChecker extends Application {
         logger.info("Getting list of files ...");
 
         data.clear();
-        table.setItems(data);
 
         Provider[] providers = Security.getProviders();
         for (Provider p : providers) {
@@ -234,6 +223,8 @@ public class MultiMediaChecker extends Application {
     private void configureTable() {
         table = new TableView<MediaFile>();
 
+        table.setItems(data);
+
         TableColumn<MediaFile, String> colFileName = new TableColumn<>("Filename");
         colFileName.setPrefWidth(400);
         colFileName.setCellValueFactory(new PropertyValueFactory<MediaFile, String>("fileName"));
@@ -249,7 +240,7 @@ public class MultiMediaChecker extends Application {
         colType.setCellValueFactory(new PropertyValueFactory<MediaFile, String>("fileType"));
 
         table.getColumns().addAll(colFileName, colType, colChecksum, colSize);
-    
+
     }
 
     public static class MediaFile {
@@ -271,10 +262,10 @@ public class MultiMediaChecker extends Application {
         }
 
         public MediaFile(Path file, long size, String checkSum, String fileType) {
-            setFileName(file.toString());
-            setSize(size);
-            setChecksum(checkSum);
-            setFileType(fileType);
+            this.fileName.set(file.toString());
+            this.size.set(size);
+            this.checksum.set(checkSum);
+            this.fileType.set(fileType);
         }
 
         public String getFileName() {
@@ -338,7 +329,13 @@ public class MultiMediaChecker extends Application {
 
             MediaFile media = new MediaFile(file, attr.size(), checkSum, contentType);
             data.add(media);
-
+            
+            try {
+                Thread.sleep(500);
+            } catch (InterruptedException ex) {
+                logger.log(Level.SEVERE, "Sleep exception: ", ex);
+            }
+            
             nFiles++;
             return CONTINUE;
         }
