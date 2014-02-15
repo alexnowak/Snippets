@@ -19,6 +19,7 @@ import java.nio.file.Path;
 import java.nio.file.SimpleFileVisitor;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.security.Provider;
 import java.security.Security;
 import java.util.List;
@@ -56,11 +57,12 @@ public class MultiMediaChecker extends Application {
     private Path rootDir;
 
     // JavaFX components
-    Label statusBar = new Label("");
-    TableView<MediaFile> table = new TableView<MediaFile>();
-    TextField dirField = new TextField();
+    private Label statusBar = new Label("");
+    private volatile TableView<MediaFile> table = new TableView<MediaFile>();
+    private TextField dirField = new TextField();
     private Stage stage;
-    Scene scene;
+    private Scene scene;
+
     ObservableList<MediaFile> data = FXCollections.observableArrayList();
 
     /**
@@ -195,6 +197,12 @@ public class MultiMediaChecker extends Application {
 
         data.clear();
 
+        // adding 2 test rows:
+        data.add(new MediaFile(FileSystems.getDefault().getPath("/aaa/aaa/aaa"), 1000, "aaa", "bbb"));
+        sleep(1000);
+        data.add(new MediaFile(FileSystems.getDefault().getPath("/bbb/bbb/bbb"), 2000, "bbb", "ccc"));
+        sleep(1000);
+
         Provider[] providers = Security.getProviders();
         for (Provider p : providers) {
             System.out.println(p.getName() + " : " + p.getInfo());
@@ -220,20 +228,21 @@ public class MultiMediaChecker extends Application {
                 + " prefWidth=" + control.getPrefWidth());
     }
 
+    /**
+     * Defines table layout and column definition.
+     */
     private void configureTable() {
-        table = new TableView<MediaFile>();
-
-        table.setItems(data);
+        table = new TableView<MediaFile>(data);
 
         TableColumn<MediaFile, String> colFileName = new TableColumn<>("Filename");
-        colFileName.setPrefWidth(400);
+        colFileName.setPrefWidth(600);
         colFileName.setCellValueFactory(new PropertyValueFactory<MediaFile, String>("fileName"));
 
         TableColumn<MediaFile, Long> colSize = new TableColumn<>("Size");
         colSize.setCellValueFactory(new PropertyValueFactory<MediaFile, Long>("size"));
 
         TableColumn<MediaFile, String> colChecksum = new TableColumn<>("Checksum");
-        colChecksum.setPrefWidth(80);
+        colChecksum.setPrefWidth(250);
         colChecksum.setCellValueFactory(new PropertyValueFactory("checksum"));
 
         TableColumn<MediaFile, String> colType = new TableColumn<>("Type");
@@ -243,12 +252,123 @@ public class MultiMediaChecker extends Application {
 
     }
 
+    private class PrintFiles extends SimpleFileVisitor<Path> {
+
+        private int nFiles = 0;
+        private int nDirs = 0;
+
+        // Print information about
+        // each type of file.
+        @Override
+        public FileVisitResult visitFile(Path file,
+                BasicFileAttributes attr) throws IOException {
+
+            System.out.print("[" + nFiles + "] ");
+
+            if (attr.isSymbolicLink()) {
+                System.out.format("Symbolic link: %s ", file);
+            } else if (attr.isRegularFile()) {
+                System.out.format("Regular file: %s ", file);
+            } else {
+                System.out.format("Other: %s ", file);
+            }
+            String contentType = Files.probeContentType(file);
+            String checkSum = checksum(file.toFile());
+            System.out.print("(" + attr.size() + " bytes) "
+                    + "Type: " + ((contentType == null) ? "unknown" : contentType));
+            System.out.print(" MD5=" + checkSum + "\n");
+
+            MediaFile media = new MediaFile(file, attr.size(), checkSum, contentType);
+            data.add(media);
+            sleep(500);
+
+            nFiles++;
+            return CONTINUE;
+        }
+
+        public int getNumberProcessedFiles() {
+            return nFiles;
+        }
+
+        public int getNumberProcessedDirectories() {
+            return nDirs;
+        }
+
+        // Print each directory visited.
+        @Override
+        public FileVisitResult postVisitDirectory(Path dir,
+                IOException exc) {
+            System.out.format("Directory %d: %s%n", nDirs, dir);
+            nDirs++;
+            return CONTINUE;
+        }
+
+        /**
+         * If there is some error accessing the file, let the user know. If you
+         * don't override this method and an error occurs, an IOException is
+         * thrown.
+         *
+         * @param file - reference to file with error
+         * @param exc - IO exception
+         * @return the visit result
+         */
+        @Override
+        public FileVisitResult visitFileFailed(Path file,
+                IOException exc) {
+            System.err.println(exc);
+            return CONTINUE;
+        }
+
+    }
+
+    private void sleep(long miliSecs) {
+//        try {
+//            Thread.sleep(miliSecs);
+//        } catch (InterruptedException ex) {
+//            logger.log(Level.SEVERE, "Sleep exception: ", ex);
+//        }
+    }
+
+    static public String checksum(File file) {
+        try {
+            java.security.MessageDigest md5er;
+            try (InputStream fin = new FileInputStream(file)) {
+                md5er = MessageDigest.getInstance("MD5");  // MD5, or CRC32
+                byte[] buffer = new byte[1024];
+                int read;
+                do {
+                    read = fin.read(buffer);
+                    if (read > 0) {
+                        md5er.update(buffer, 0, read);
+                    }
+                } while (read != -1);
+            }
+            byte[] digest = md5er.digest();
+            if (digest == null) {
+                return null;
+            }
+            String strDigest = "0x";
+            for (int i = 0; i < digest.length; i++) {
+                strDigest += Integer.toString((digest[i] & 0xff)
+                        + 0x100, 16).substring(1).toUpperCase();
+            }
+            return strDigest;
+        } catch (IOException | NoSuchAlgorithmException e) {
+            System.out.println("Error:");
+            e.printStackTrace();
+            return null;
+        }
+    }
+
+    /**
+     * Class holding table data. Each row contains a file.
+     */
     public static class MediaFile {
 
         public SimpleStringProperty fileName = new SimpleStringProperty();
         public SimpleStringProperty fileType = new SimpleStringProperty();
         public SimpleStringProperty checksum = new SimpleStringProperty();
-        public SimpleLongProperty   size     = new SimpleLongProperty();
+        public SimpleLongProperty size = new SimpleLongProperty();
 
         public MediaFile() {
         }
@@ -301,107 +421,4 @@ public class MultiMediaChecker extends Application {
         }
     }
 
-    private class PrintFiles extends SimpleFileVisitor<Path> {
-
-        private int nFiles = 0;
-        private int nDirs = 0;
-
-        // Print information about
-        // each type of file.
-        @Override
-        public FileVisitResult visitFile(Path file,
-                BasicFileAttributes attr) throws IOException {
-
-            System.out.print("[" + nFiles + "] ");
-
-            if (attr.isSymbolicLink()) {
-                System.out.format("Symbolic link: %s ", file);
-            } else if (attr.isRegularFile()) {
-                System.out.format("Regular file: %s ", file);
-            } else {
-                System.out.format("Other: %s ", file);
-            }
-            String contentType = Files.probeContentType(file);
-            String checkSum = checksum(file.toFile());
-            System.out.print("(" + attr.size() + " bytes) "
-                    + "Type: " + ((contentType == null) ? "unknown" : contentType));
-            System.out.print(" MD5=" + checkSum + "\n");
-
-            MediaFile media = new MediaFile(file, attr.size(), checkSum, contentType);
-            data.add(media);
-            
-            try {
-                Thread.sleep(500);
-            } catch (InterruptedException ex) {
-                logger.log(Level.SEVERE, "Sleep exception: ", ex);
-            }
-            
-            nFiles++;
-            return CONTINUE;
-        }
-
-        public int getNumberProcessedFiles() {
-            return nFiles;
-        }
-
-        public int getNumberProcessedDirectories() {
-            return nDirs;
-        }
-
-        // Print each directory visited.
-        @Override
-        public FileVisitResult postVisitDirectory(Path dir,
-                IOException exc) {
-            System.out.format("Directory %d: %s%n", nDirs, dir);
-            nDirs++;
-            return CONTINUE;
-        }
-
-        /**
-         * If there is some error accessing the file, let the user know. If you
-         * don't override this method and an error occurs, an IOException is
-         * thrown.
-         *
-         * @param file - reference to file with error
-         * @param exc - IO exception
-         * @return the visit result
-         */
-        @Override
-        public FileVisitResult visitFileFailed(Path file,
-                IOException exc) {
-            System.err.println(exc);
-            return CONTINUE;
-        }
-    }
-
-    static public String checksum(File file) {
-        try {
-            java.security.MessageDigest md5er;
-            try (InputStream fin = new FileInputStream(file)) {
-                md5er = MessageDigest.getInstance("MD5");  // MD5, or CRC32
-                byte[] buffer = new byte[1024];
-                int read;
-                do {
-                    read = fin.read(buffer);
-                    if (read > 0) {
-                        md5er.update(buffer, 0, read);
-                    }
-                } while (read != -1);
-            }
-            byte[] digest = md5er.digest();
-            if (digest == null) {
-                return null;
-            }
-            String strDigest = "0x";
-            for (int i = 0; i < digest.length; i++) {
-                strDigest += Integer.toString((digest[i] & 0xff)
-                        + 0x100, 16).substring(1).toUpperCase();
-            }
-            return strDigest;
-        } catch (Exception e) {
-            System.out.println("Error:");
-            e.printStackTrace();
-            return null;
-        }
-    }
 }
