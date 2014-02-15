@@ -58,7 +58,7 @@ public class MultiMediaChecker extends Application {
 
     // JavaFX components
     private Label statusBar = new Label("");
-    private volatile TableView<MediaFile> table = new TableView<MediaFile>();
+    private volatile TableView<MediaFile> table = new TableView<>();
     private TextField dirField = new TextField();
     private Stage stage;
     private Scene scene;
