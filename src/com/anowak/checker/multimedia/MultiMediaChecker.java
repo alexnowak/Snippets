@@ -18,11 +18,13 @@ import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.SimpleFileVisitor;
 import java.nio.file.attribute.BasicFileAttributes;
+import java.nio.file.attribute.FileTime;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 import java.util.logging.ConsoleHandler;
 import java.util.logging.Handler;
 import java.util.logging.Level;
@@ -64,7 +66,7 @@ public class MultiMediaChecker extends Application {
 
     // JavaFX components
     private Label statusBar = new Label("");
-    private TableView<TableRow> table = new TableView<>();
+    private TableView<TableRow> resultTable = new TableView<>();
 
     private TextField dir1Field = new TextField();
     private TextField dir2Field = new TextField();
@@ -122,14 +124,23 @@ public class MultiMediaChecker extends Application {
 	public SimpleLongProperty size2 = new SimpleLongProperty(-1L);
 
 	public SimpleStringProperty status = new SimpleStringProperty("");
-	
+
 	protected Side side;
-	
-	public TableRow() { }
-	public TableRow(String fileName, long size, String checkSum, String fileType, Side side) {
+	private FileTime creationTime;
+	private FileTime lastAccessTime;
+
+	public TableRow() {
+	}
+
+	public TableRow(String fileName, long size, String checkSum, String fileType, Side side,
+		FileTime creationTime, FileTime lastAccessTime) {
 	    setFileName(fileName);
 	    setSide(side);
 	    setFileType(fileType);
+
+	    this.creationTime = creationTime;
+	    this.lastAccessTime = lastAccessTime;
+
 	    if (side == Side.LEFT) {
 		setSize1(size);
 		setChecksum1(checkSum);
@@ -139,29 +150,66 @@ public class MultiMediaChecker extends Application {
 	    }
 	}
 
-	public Side getSide() { return side; }
-	public final void setSide(Side side) { this.side = side; }
+	public Side getSide() {
+	    return side;
+	}
+
+	public final void setSide(Side side) {
+	    this.side = side;
+	}
 
 	// common props
-	public final void setFileName(String fileName) { 
+	public final void setFileName(String fileName) {
 	    this.fileName.set(fileName);
 	}
-	public String getFileName() { return this.fileName.get(); }
-	public String getFileType() {return fileType.get(); }
-	public final void setFileType(String fileType) { this.fileType.set(fileType); }
+
+	public String getFileName() {
+	    return this.fileName.get();
+	}
+
+	public String getFileType() {
+	    return fileType.get();
+	}
+
+	public final void setFileType(String fileType) {
+	    this.fileType.set(fileType);
+	}
 
 	// left side
-	public String getChecksum1() { return this.checksum1.get(); }
-	public final void setChecksum1(String checksum) { this.checksum1.set(checksum); }
-	public Long getSize1() { return size1.get(); }
-	public final void setSize1(long size) { this.size1.set(size); }
+	public String getChecksum1() {
+	    return this.checksum1.get();
+	}
+
+	public final void setChecksum1(String checksum) {
+	    this.checksum1.set(checksum);
+	}
+
+	public Long getSize1() {
+	    return size1.get();
+	}
+
+	public final void setSize1(long size) {
+	    this.size1.set(size);
+	}
 
 	// right Side
-	public String getChecksum2() { return this.checksum2.get(); }
-	public final void setChecksum2(String checksum) { this.checksum2.set(checksum); }
-	public long getSize2() { return size2.get(); }
-	public final void setSize2(long size) { this.size2.set(size); }
-	private void setFile2Attributes(long size, String checkSum) { 
+	public String getChecksum2() {
+	    return this.checksum2.get();
+	}
+
+	public final void setChecksum2(String checksum) {
+	    this.checksum2.set(checksum);
+	}
+
+	public long getSize2() {
+	    return size2.get();
+	}
+
+	public final void setSize2(long size) {
+	    this.size2.set(size);
+	}
+
+	private void setFile2Attributes(long size, String checkSum) {
 	    this.side = Side.BOTH;
 	    setSize2(size);
 	    setChecksum2(checkSum);
@@ -173,19 +221,19 @@ public class MultiMediaChecker extends Application {
 		case LEFT:
 		    return "RIGHT MISSING";
 		case RIGHT:
-		    return "LEFT MISSING";  
+		    return "LEFT MISSING";
 	    }
 
 	    // File exists in both directories, check for identity.
-	    boolean identical = (getSize1() == getSize2()) && (getChecksum1().compareTo(getChecksum2())==0);
+	    boolean identical = (getSize1() == getSize2()) && (getChecksum1().compareTo(getChecksum2()) == 0);
 	    this.status.set(identical ? "EQUAL" : "DIFFERENT");
 	    return this.status.get();
 	}
-	
+
 	@Override
 	public String toString() {
-	    return "" + side + " " + getFileName() 
-		    + " " + getSize1() + " " + getChecksum1() 
+	    return "" + side + " " + getFileName()
+		    + " " + getSize1() + " " + getChecksum1()
 		    + " " + getSize2() + " " + getChecksum2();
 	}
     }
@@ -202,7 +250,7 @@ public class MultiMediaChecker extends Application {
 
 	TableColumn<TableRow, String> colType = new TableColumn<>("Type");
 	colType.setCellValueFactory(new PropertyValueFactory<TableRow, String>("fileType"));
-	
+
 	TableColumn<TableRow, Long> colSize1 = new TableColumn<>("Size1");
 	colSize1.setCellValueFactory(new PropertyValueFactory<TableRow, Long>("size1"));
 
@@ -217,18 +265,15 @@ public class MultiMediaChecker extends Application {
 	colChecksum2.setPrefWidth(250);
 	colChecksum2.setCellValueFactory(new PropertyValueFactory("checksum2"));
 
-
 	TableColumn<TableRow, String> colStatus = new TableColumn<>("Status");
 	//colStatus.setPrefWidth(250);
 	colStatus.setCellValueFactory(new PropertyValueFactory("status"));
-
 
 	table.getColumns().addAll(colFileName, colType, colChecksum1, colSize1, colStatus, colChecksum2, colSize2);
 
 	return table;
     }
-    
-    
+
     /**
      * Main function of this calls. Will lunch JavaFX
      *
@@ -248,7 +293,7 @@ public class MultiMediaChecker extends Application {
      */
     @Override
     public void start(Stage primaryStage) throws Exception {
-	configureLogging(Level.FINEST);
+	configureLogging(Level.FINER);
 
 	List<String> params = getParameters().getRaw();
 
@@ -281,7 +326,7 @@ public class MultiMediaChecker extends Application {
 
 		    logger.info("Number of items in map: " + map.size());
 
-		    table.setItems(FXCollections.observableArrayList(map.values()));
+		    resultTable.setItems(FXCollections.observableArrayList(map.values()));
 		} catch (IOException e) {
 		    logger.log(Level.SEVERE, "IOException caught: ", e);
 		}
@@ -293,8 +338,11 @@ public class MultiMediaChecker extends Application {
 	    @Override
 	    public void handle(ActionEvent event) {
 		statusBar.setText("Adding table row");
-		map.put("/aaa/aaa/aaa", new TableRow("/aaa/aaa/aaa", 1000, "aaa", "aaa", Side.LEFT));
-		map.put("/bbb/bbb/bbb", new TableRow("/bbb/bbb/bbb", 1000, "bbb", "bbb", Side.RIGHT));
+		map.put("/aaa/aaa/aaa", new TableRow("/aaa/aaa/aaa", 1000, "aaa", "aaa", Side.LEFT,
+			FileTime.fromMillis(System.currentTimeMillis()), FileTime.fromMillis(System.currentTimeMillis())));
+		map.put("/bbb/bbb/bbb", new TableRow("/bbb/bbb/bbb", 1000, "bbb", "bbb", Side.RIGHT,
+			FileTime.fromMillis(System.currentTimeMillis()), FileTime.fromMillis(System.currentTimeMillis())));
+
 	    }
 	});
 
@@ -305,7 +353,7 @@ public class MultiMediaChecker extends Application {
 	    public void handle(ActionEvent event) {
 		statusBar.setText("Clearing table...");
 		map.clear();
-		table.getItems().clear();
+		resultTable.getItems().clear();
 	    }
 	});
 
@@ -327,16 +375,16 @@ public class MultiMediaChecker extends Application {
 	controls.getChildren().addAll(startBtn, dir1Field, dirBtn1, dir2Field, dirBtn2, newBtn, clearBtn);
 	controls.setSpacing(10);
 
-	this.table = createTable();
+	this.resultTable = createTable();
 
-	AnchorPane.setTopAnchor(table, 10.0);
-	AnchorPane.setLeftAnchor(table, 10.0);
-	AnchorPane.setRightAnchor(table, 10.0);
-	AnchorPane.setBottomAnchor(table, 10.0);
+	AnchorPane.setTopAnchor(resultTable, 10.0);
+	AnchorPane.setLeftAnchor(resultTable, 10.0);
+	AnchorPane.setRightAnchor(resultTable, 10.0);
+	AnchorPane.setBottomAnchor(resultTable, 10.0);
 
 	VBox vbox = new VBox(3);
-	VBox.setVgrow(table, Priority.ALWAYS);
-	vbox.getChildren().addAll(controls, table, statusBar);
+	VBox.setVgrow(resultTable, Priority.ALWAYS);
+	vbox.getChildren().addAll(controls, resultTable, statusBar);
 
 	scene = new Scene(vbox);
 
@@ -377,7 +425,7 @@ public class MultiMediaChecker extends Application {
 	logger.info("= Statistics: " + pf.getNumberProcessedDirectories()
 		+ " directories " + pf.getNumberProcessedFiles() + " files");
 	for (String k : map.keySet()) {
-	    logger.fine(k+": "+map.get(k));    
+	    logger.fine(k + ": " + map.get(k));
 	}
 	logger.info("======================================================");
 
@@ -385,13 +433,12 @@ public class MultiMediaChecker extends Application {
 		+ pf.getNumberProcessedFiles() + " files");
     }
 
-
     private class PrintFiles extends SimpleFileVisitor<Path> {
 
 	private int nFiles = 0;
 	private int nDirs = 0;
 
-        // Print information about
+	// Print information about
 	// each type of file.
 	@Override
 	public FileVisitResult visitFile(Path file,
@@ -414,25 +461,23 @@ public class MultiMediaChecker extends Application {
 		    + "Type: " + ((contentType == null) ? "unknown" : contentType));
 	    log.append(" MD5=" + checkSum + "\n");
 	    logger.finer(log.toString());
-	    
+
 	    /**
-	     * **** for testing... System.out.print(" MD2 =" + checksum(file.toFile(),"MD2") + "\n"); System.out.print("
-	     * SHA-1 =" + checksum(file.toFile(),"SHA-1") + "\n"); System.out.print(" SHA-256=" +
+	     * **** for testing... System.out.print(" MD2 =" + checksum(file.toFile(),"MD2") + "\n");
+	     * System.out.print(" SHA-1 =" + checksum(file.toFile(),"SHA-1") + "\n"); System.out.print(" SHA-256=" +
 	     * checksum(file.toFile(),"SHA-256") + "\n"); System.out.print(" SHA-384=" +
 	     * checksum(file.toFile(),"SHA-384") + "\n"); System.out.print(" SHA-512=" +
-	     * checksum(file.toFile(),"SHA-512") + "\n");
-            ****
+	     * checksum(file.toFile(),"SHA-512") + "\n"); ***
 	     */
-
 	    String key = getKey(file.toString());
 	    if (map.containsKey(key)) {
 		TableRow media = map.get(key);
 		media.setFile2Attributes(attr.size(), checkSum);
 	    } else {
-		TableRow media = new TableRow(key, attr.size(), checkSum, contentType, currentSide);
+		TableRow media = new TableRow(key, attr.size(), checkSum, contentType, currentSide,
+			attr.creationTime(), attr.lastModifiedTime());
 		TableRow prev = map.put(key, media);
 	    }
-
 	    nFiles++;
 	    return CONTINUE;
 	}
@@ -473,12 +518,12 @@ public class MultiMediaChecker extends Application {
 	    String key;
 	    if (currentSide == Side.LEFT) {
 		logger.finest("fullpath=" + fullpath + " side=" + currentSide + " rootDir=" + root1Dir);
-		key = fullpath.substring(root1Dir.toString().length()+1);
+		key = fullpath.substring(root1Dir.toString().length() + 1);
 	    } else {
 		logger.finest("fullpath=" + fullpath + " side=" + currentSide + " rootDir=" + root2Dir);
-		key = fullpath.substring(root2Dir.toString().length()+1);
+		key = fullpath.substring(root2Dir.toString().length() + 1);
 	    }
-	    logger.finest("\tkey="+key);
+	    logger.finest("\tkey=" + key);
 	    return key;
 	}
     }
@@ -549,7 +594,7 @@ public class MultiMediaChecker extends Application {
 	handler.setFormatter(new SimpleFormatter() {
 	    @Override
 	    public synchronized String format(LogRecord record) {
-		return String.format("%1$-7.7s %2$-20.20s: %3$s\n", record.getLevel(), record.getSourceMethodName(),record.getMessage());
+		return String.format("%1$-7.7s %2$-20.20s: %3$s\n", record.getLevel(), record.getSourceMethodName(), record.getMessage());
 	    }
 	});
 
