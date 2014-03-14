@@ -20,21 +20,23 @@ import java.nio.file.SimpleFileVisitor;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
-import java.security.Provider;
-import java.security.Security;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.logging.ConsoleHandler;
+import java.util.logging.Handler;
 import java.util.logging.Level;
+import java.util.logging.LogRecord;
 import java.util.logging.Logger;
+import java.util.logging.SimpleFormatter;
 import javafx.application.Application;
 import javafx.beans.property.SimpleLongProperty;
 import javafx.beans.property.SimpleStringProperty;
 import javafx.collections.FXCollections;
-import javafx.collections.ObservableList;
 import javafx.event.ActionEvent;
 import javafx.event.EventHandler;
 import javafx.scene.Scene;
 import javafx.scene.control.Button;
-import javafx.scene.control.Control;
 import javafx.scene.control.Label;
 import javafx.scene.control.TableColumn;
 import javafx.scene.control.TableView;
@@ -54,31 +56,188 @@ import javafx.stage.Stage;
 public class MultiMediaChecker extends Application {
 
     static final Logger logger = Logger.getLogger(MultiMediaChecker.class.getName());
-    private Path rootDir;
+
+    enum Side {
+
+	LEFT, RIGHT, BOTH
+    };
 
     // JavaFX components
     private Label statusBar = new Label("");
-    private volatile TableView<MediaFile> table = new TableView<>();
-    private TextField dirField = new TextField();
+    private TableView<TableRow> table = new TableView<>();
+
+    private TextField dir1Field = new TextField();
+    private TextField dir2Field = new TextField();
+    Map<String, TableRow> map = new HashMap<>();
+
+    private Path root1Dir, root2Dir;
+    private Side currentSide;
     private Stage stage;
     private Scene scene;
+    private EventHandler<ActionEvent> dirEventHandler = new EventHandler<ActionEvent>() {
+	@Override
+	public void handle(ActionEvent event) {
+	    Button btn = (Button) event.getSource();
+	    logger.fine("RootDir is: " + root1Dir + " Button: " + btn.getId());
 
-    ObservableList<MediaFile> data = FXCollections.observableArrayList();
+	    Side side = btn.getId().contains("1") ? Side.LEFT : Side.RIGHT;
 
+	    DirectoryChooser dirChooser = new DirectoryChooser();
+	    dirChooser.setTitle("Select Root Directory for " + btn.getId());
+
+	    dirChooser.setInitialDirectory(side == Side.LEFT ? root1Dir.toFile() : root2Dir.toFile());
+	    File dir = dirChooser.showDialog(stage);
+	    if (dir == null) {
+		logger.info("No directroy selected.");
+		return;
+	    }
+	    logger.info("Selected dir: " + dir.getAbsolutePath());
+	    try {
+		setRootDir(side, dir.getAbsolutePath());
+		if (side == Side.LEFT) {
+		    dir1Field.setText(root1Dir.toString());
+		    statusBar.setText("New " + side + " root dir: " + root1Dir.toString());
+		} else {
+		    dir2Field.setText(root2Dir.toString());
+		    statusBar.setText("New " + side + " root dir: " + root2Dir.toString());
+		}
+	    } catch (IOException e) {
+		logger.log(Level.SEVERE, "Error with selected dir: " + dir.getAbsolutePath(), e);
+	    }
+	}
+    };
+
+    /**
+     * Class holding table map. Each row contains one file of each dir.
+     */
+    public static class TableRow {
+
+	public SimpleStringProperty fileName = new SimpleStringProperty();
+	public SimpleStringProperty fileType = new SimpleStringProperty();
+
+	public SimpleStringProperty checksum1 = new SimpleStringProperty("");
+	public SimpleLongProperty size1 = new SimpleLongProperty(-1L);
+
+	public SimpleStringProperty checksum2 = new SimpleStringProperty("");
+	public SimpleLongProperty size2 = new SimpleLongProperty(-1L);
+
+	public SimpleStringProperty status = new SimpleStringProperty("");
+	
+	protected Side side;
+	
+	public TableRow() { }
+	public TableRow(String fileName, long size, String checkSum, String fileType, Side side) {
+	    setFileName(fileName);
+	    setSide(side);
+	    setFileType(fileType);
+	    if (side == Side.LEFT) {
+		setSize1(size);
+		setChecksum1(checkSum);
+	    } else {
+		setSize2(size);
+		setChecksum2(checkSum);
+	    }
+	}
+
+	public Side getSide() { return side; }
+	public final void setSide(Side side) { this.side = side; }
+
+	// common props
+	public final void setFileName(String fileName) { 
+	    this.fileName.set(fileName);
+	}
+	public String getFileName() { return this.fileName.get(); }
+	public String getFileType() {return fileType.get(); }
+	public final void setFileType(String fileType) { this.fileType.set(fileType); }
+
+	// left side
+	public String getChecksum1() { return this.checksum1.get(); }
+	public final void setChecksum1(String checksum) { this.checksum1.set(checksum); }
+	public Long getSize1() { return size1.get(); }
+	public final void setSize1(long size) { this.size1.set(size); }
+
+	// right Side
+	public String getChecksum2() { return this.checksum2.get(); }
+	public final void setChecksum2(String checksum) { this.checksum2.set(checksum); }
+	public long getSize2() { return size2.get(); }
+	public final void setSize2(long size) { this.size2.set(size); }
+	private void setFile2Attributes(long size, String checkSum) { 
+	    this.side = Side.BOTH;
+	    setSize2(size);
+	    setChecksum2(checkSum);
+	}
+
+	public String getStatus() {
+	    // Check if either left or right side is missing
+	    switch (getSide()) {
+		case LEFT:
+		    return "RIGHT MISSING";
+		case RIGHT:
+		    return "LEFT MISSING";  
+	    }
+
+	    // File exists in both directories, check for identity.
+	    boolean identical = (getSize1() == getSize2()) && (getChecksum1().compareTo(getChecksum2())==0);
+	    this.status.set(identical ? "EQUAL" : "DIFFERENT");
+	    return this.status.get();
+	}
+	
+	@Override
+	public String toString() {
+	    return "" + side + " " + getFileName() 
+		    + " " + getSize1() + " " + getChecksum1() 
+		    + " " + getSize2() + " " + getChecksum2();
+	}
+    }
+
+    /**
+     * Creates table for holding TableRows
+     */
+    private TableView createTable() {
+	TableView<TableRow> table = new TableView<>();
+
+	TableColumn<TableRow, String> colFileName = new TableColumn<>("Filename");
+	colFileName.setPrefWidth(400);
+	colFileName.setCellValueFactory(new PropertyValueFactory<TableRow, String>("fileName"));
+
+	TableColumn<TableRow, String> colType = new TableColumn<>("Type");
+	colType.setCellValueFactory(new PropertyValueFactory<TableRow, String>("fileType"));
+	
+	TableColumn<TableRow, Long> colSize1 = new TableColumn<>("Size1");
+	colSize1.setCellValueFactory(new PropertyValueFactory<TableRow, Long>("size1"));
+
+	TableColumn<TableRow, String> colChecksum1 = new TableColumn<>("Checksum1");
+	colChecksum1.setPrefWidth(250);
+	colChecksum1.setCellValueFactory(new PropertyValueFactory("checksum1"));
+
+	TableColumn<TableRow, Long> colSize2 = new TableColumn<>("Size2");
+	colSize2.setCellValueFactory(new PropertyValueFactory<TableRow, Long>("size2"));
+
+	TableColumn<TableRow, String> colChecksum2 = new TableColumn<>("Checksum2");
+	colChecksum2.setPrefWidth(250);
+	colChecksum2.setCellValueFactory(new PropertyValueFactory("checksum2"));
+
+
+	TableColumn<TableRow, String> colStatus = new TableColumn<>("Status");
+	//colStatus.setPrefWidth(250);
+	colStatus.setCellValueFactory(new PropertyValueFactory("status"));
+
+
+	table.getColumns().addAll(colFileName, colType, colChecksum1, colSize1, colStatus, colChecksum2, colSize2);
+
+	return table;
+    }
+    
+    
     /**
      * Main function of this calls. Will lunch JavaFX
      *
-     * @param args First optional argument can define root directory for check
-     * run.
+     * @param args First optional argument can define root directory for check run.
      *
      * @throws Exception
      */
     static public void main(String[] args) throws Exception {
-        if (args.length != 1) {
-            logger.severe("Usage: java com.anowak.checker.audio.Mp3Checker <mp3file>");
-            System.exit(-1);
-        }
-        Application.launch(args);
+	Application.launch(args);
     }
 
     /**
@@ -89,236 +248,239 @@ public class MultiMediaChecker extends Application {
      */
     @Override
     public void start(Stage primaryStage) throws Exception {
-        logger.setLevel(Level.FINEST);
+	configureLogging(Level.FINEST);
 
-        List<String> params = getParameters().getRaw();
+	List<String> params = getParameters().getRaw();
 
-        if (params.size() != 1) {
-            logger.info("Usage: java com.anowak.checker.multimedia.MultiMediaChecker <rootDir>");
-            setRootDir(".");
-        } else {
-            setRootDir(params.get(0));
-        }
+	if (params.size() != 2) {
+	    logger.info("Usage: java com.anowak.checker.multimedia.MultiMediaChecker <rootDir1> <rootDir2>");
+	    setRootDir(Side.LEFT, ".");
+	    setRootDir(Side.RIGHT, ".");
+	} else {
+	    setRootDir(Side.LEFT, params.get(0));
+	    setRootDir(Side.RIGHT, params.get(1));
+	}
 
-        statusBar.setMaxWidth(Double.MAX_VALUE);
-        statusBar.setText("Root Dir: " + rootDir.toString());
+	statusBar.setMaxWidth(Double.MAX_VALUE);
+	statusBar.setText("LEFT DIR: " + root1Dir.toString() + " RIGHT DIR: " + root2Dir.toString());
 
-        Button startButton = new Button("Start");
-        startButton.setOnAction(new EventHandler<ActionEvent>() {
+	Button startBtn = new Button("Start");
+	startBtn.setOnAction(new EventHandler<ActionEvent>() {
+	    @Override
+	    public void handle(ActionEvent event) {
+		try {
+		    map.clear();
 
-            @Override
-            public void handle(ActionEvent event) {
-                statusBar.setText("Searching dir: " + dirField.getText() + " ...");
-                try {
-                    navigateDirs();
-                } catch (IOException e) {
-                    logger.log(Level.SEVERE, "IOException caught: ", e);
-                }
-            }
-        });
+		    setRootDir(Side.LEFT, dir1Field.getText());
+		    setRootDir(Side.RIGHT, dir2Field.getText());
 
-        Button dirButton = new Button("...");
-        dirButton.setOnAction(new EventHandler<ActionEvent>() {
-            @Override
-            public void handle(ActionEvent event) {
-                System.out.println("Logger Level: " + logger.getLevel());
-                logger.fine("RootDir is: " + rootDir);
-                DirectoryChooser dirChooser = new DirectoryChooser();
-                dirChooser.setTitle("Select Root Directory");
-                dirChooser.setInitialDirectory(rootDir.toFile());
-                File dir = dirChooser.showDialog(stage);
-                if (dir == null) {
-                    logger.info("No directroy selected.");
-                    return;
-                }
-                logger.info("Selected dir: " + dir.getAbsolutePath());
-                try {
-                    setRootDir(dir.getAbsolutePath());
-                    dirField.setText(rootDir.toString());
-                    statusBar.setText("New root dir: " + rootDir.toString());
-                    printSizes("statusBar", statusBar);
-                    printSizes("dirField", dirField);
-                } catch (IOException e) {
-                    logger.log(Level.SEVERE, "Error with selected dir: " + dir.getAbsolutePath(), e);
-                }
+		    statusBar.setText("Searching dir1: " + dir1Field.getText() + " ...");
+		    navigateDirs(root1Dir, Side.LEFT);
+		    statusBar.setText("Searching dir2: " + dir2Field.getText() + " ...");
+		    navigateDirs(root2Dir, Side.RIGHT);
 
-            }
-        });
+		    logger.info("Number of items in map: " + map.size());
 
-        dirField.setText(rootDir.toString());
-        dirField.setMinWidth(400);
+		    table.setItems(FXCollections.observableArrayList(map.values()));
+		} catch (IOException e) {
+		    logger.log(Level.SEVERE, "IOException caught: ", e);
+		}
+	    }
+	});
 
-        HBox controls = new HBox();
-        HBox.setHgrow(dirField, Priority.ALWAYS);
-        controls.getChildren().addAll(startButton, dirField, dirButton);
-        controls.setSpacing(10);
+	Button newBtn = new Button("New");
+	newBtn.setOnAction(new EventHandler<ActionEvent>() {
+	    @Override
+	    public void handle(ActionEvent event) {
+		statusBar.setText("Adding table row");
+		map.put("/aaa/aaa/aaa", new TableRow("/aaa/aaa/aaa", 1000, "aaa", "aaa", Side.LEFT));
+		map.put("/bbb/bbb/bbb", new TableRow("/bbb/bbb/bbb", 1000, "bbb", "bbb", Side.RIGHT));
+	    }
+	});
 
-        configureTable();
+	Button clearBtn = new Button("Clear");
+	clearBtn.setOnAction(new EventHandler<ActionEvent>() {
 
-        VBox vbox = new VBox(3);
-        VBox.setVgrow(table, Priority.ALWAYS);
-        vbox.getChildren().addAll(controls, table, statusBar);
+	    @Override
+	    public void handle(ActionEvent event) {
+		statusBar.setText("Clearing table...");
+		map.clear();
+		table.getItems().clear();
+	    }
+	});
 
-        AnchorPane pane = new AnchorPane();
-        AnchorPane.setTopAnchor(vbox, 10.0);
-        AnchorPane.setLeftAnchor(vbox, 10.0);
-        AnchorPane.setRightAnchor(vbox, 10.0);
-        AnchorPane.setBottomAnchor(vbox, 10.0);
+	Button dirBtn1 = new Button("...");
+	dirBtn1.setId("Button1");
+	dirBtn1.setOnAction(dirEventHandler);
+	dir1Field.setText(root1Dir.toString());
+	dir1Field.setMinWidth(400);
 
-        pane.getChildren().addAll(vbox);
+	Button dirBtn2 = new Button("...");
+	dirBtn2.setId("Button2");
+	dirBtn2.setOnAction(dirEventHandler);
+	dir2Field.setText(root2Dir.toString());
+	dir2Field.setMinWidth(400);
 
-        scene = new Scene(pane);
+	HBox controls = new HBox();
+	HBox.setHgrow(dir1Field, Priority.ALWAYS);
+	HBox.setHgrow(dir2Field, Priority.ALWAYS);
+	controls.getChildren().addAll(startBtn, dir1Field, dirBtn1, dir2Field, dirBtn2, newBtn, clearBtn);
+	controls.setSpacing(10);
 
-        primaryStage.setTitle("Multimedia File Consistency Checker");
-        primaryStage.setScene(scene);
-        primaryStage.sizeToScene();
+	this.table = createTable();
 
-        this.stage = primaryStage;
+	AnchorPane.setTopAnchor(table, 10.0);
+	AnchorPane.setLeftAnchor(table, 10.0);
+	AnchorPane.setRightAnchor(table, 10.0);
+	AnchorPane.setBottomAnchor(table, 10.0);
 
-        printSizes("statusBar", statusBar);
-        printSizes("dirField", dirField);
+	VBox vbox = new VBox(3);
+	VBox.setVgrow(table, Priority.ALWAYS);
+	vbox.getChildren().addAll(controls, table, statusBar);
 
-        stage.show();
+	scene = new Scene(vbox);
+
+	primaryStage.setTitle("Multimedia File Consistency Checker");
+	primaryStage.setScene(scene);
+	primaryStage.sizeToScene();
+
+	this.stage = primaryStage;
+	stage.show();
     }
 
-    public Path getRootDir() {
-        return rootDir;
+    public Path getRootDir(boolean isDir1) {
+	return isDir1 ? root1Dir : root2Dir;
     }
 
-    public void setRootDir(String rootDir) throws IOException {
-        FileSystem fs = FileSystems.getDefault();
-        this.rootDir = fs.getPath(rootDir);
-        this.rootDir = this.rootDir.toRealPath(LinkOption.NOFOLLOW_LINKS);
-        logger.info("Root dir: " + this.rootDir);
+    public void setRootDir(Side side, String rootDir) throws IOException {
+	FileSystem fs = FileSystems.getDefault();
+	if (side == Side.LEFT) {
+	    this.root1Dir = fs.getPath(rootDir);
+	    this.root1Dir = this.root1Dir.toRealPath(LinkOption.NOFOLLOW_LINKS);
+	} else {
+	    this.root2Dir = fs.getPath(rootDir);
+	    this.root2Dir = this.root2Dir.toRealPath(LinkOption.NOFOLLOW_LINKS);
+	}
+	logger.info("Root " + side + " dir: " + rootDir);
     }
 
-    private void navigateDirs() throws IOException {
-        logger.info("Getting list of files ...");
+    private void navigateDirs(Path rootDir, Side side) throws IOException {
+	logger.info("Getting list of " + side + " files ...");
 
-        data.clear();
+	this.currentSide = side;
 
-        // adding 2 test rows:
-        data.add(new MediaFile(FileSystems.getDefault().getPath("/aaa/aaa/aaa"), 1000, "aaa", "bbb"));
-        sleep(1000);
-        data.add(new MediaFile(FileSystems.getDefault().getPath("/bbb/bbb/bbb"), 2000, "bbb", "ccc"));
-        sleep(1000);
+	PrintFiles pf = new PrintFiles();
+	Files.walkFileTree(rootDir, pf);
 
-        Provider[] providers = Security.getProviders();
-        for (Provider p : providers) {
-            System.out.println(p.getName() + " : " + p.getInfo());
-        }
+	logger.info("======================================================");
+	logger.info("= Dir: " + rootDir);
+	logger.info("= Statistics: " + pf.getNumberProcessedDirectories()
+		+ " directories " + pf.getNumberProcessedFiles() + " files");
+	for (String k : map.keySet()) {
+	    logger.fine(k+": "+map.get(k));    
+	}
+	logger.info("======================================================");
 
-        PrintFiles pf = new PrintFiles();
-        Files.walkFileTree(rootDir, pf);
-
-        logger.info("======================================================");
-        System.out.println("= Statistics: " + pf.getNumberProcessedDirectories()
-                + " directories " + pf.getNumberProcessedFiles() + " files");
-        logger.info("======================================================");
-
-        statusBar.setText("DONE! " + pf.getNumberProcessedDirectories() + " dirs, " + pf.getNumberProcessedFiles() + " files");
-
+	statusBar.setText("DONE! " + pf.getNumberProcessedDirectories() + " dirs, "
+		+ pf.getNumberProcessedFiles() + " files");
     }
 
-    private void printSizes(String name, Control control) {
-        logger.info(name
-                + ": width=" + control.getWidth()
-                + " minWidth=" + control.getMinWidth()
-                + " maxWidth=" + control.getMaxWidth()
-                + " prefWidth=" + control.getPrefWidth());
-    }
-
-    /**
-     * Defines table layout and column definition.
-     */
-    private void configureTable() {
-        table = new TableView<MediaFile>(data);
-
-        TableColumn<MediaFile, String> colFileName = new TableColumn<>("Filename");
-        colFileName.setPrefWidth(600);
-        colFileName.setCellValueFactory(new PropertyValueFactory<MediaFile, String>("fileName"));
-
-        TableColumn<MediaFile, Long> colSize = new TableColumn<>("Size");
-        colSize.setCellValueFactory(new PropertyValueFactory<MediaFile, Long>("size"));
-
-        TableColumn<MediaFile, String> colChecksum = new TableColumn<>("Checksum");
-        colChecksum.setPrefWidth(250);
-        colChecksum.setCellValueFactory(new PropertyValueFactory("checksum"));
-
-        TableColumn<MediaFile, String> colType = new TableColumn<>("Type");
-        colType.setCellValueFactory(new PropertyValueFactory<MediaFile, String>("fileType"));
-
-        table.getColumns().addAll(colFileName, colType, colChecksum, colSize);
-
-    }
 
     private class PrintFiles extends SimpleFileVisitor<Path> {
 
-        private int nFiles = 0;
-        private int nDirs = 0;
+	private int nFiles = 0;
+	private int nDirs = 0;
 
         // Print information about
-        // each type of file.
-        @Override
-        public FileVisitResult visitFile(Path file,
-                BasicFileAttributes attr) throws IOException {
+	// each type of file.
+	@Override
+	public FileVisitResult visitFile(Path file,
+		BasicFileAttributes attr) throws IOException {
 
-            System.out.print("[" + nFiles + "] ");
+	    StringBuilder log = new StringBuilder();
 
-            if (attr.isSymbolicLink()) {
-                System.out.format("Symbolic link: %s ", file);
-            } else if (attr.isRegularFile()) {
-                System.out.format("Regular file: %s ", file);
-            } else {
-                System.out.format("Other: %s ", file);
-            }
-            String contentType = Files.probeContentType(file);
-            String checkSum = checksum(file.toFile());
-            System.out.print("(" + attr.size() + " bytes) "
-                    + "Type: " + ((contentType == null) ? "unknown" : contentType));
-            System.out.print(" MD5=" + checkSum + "\n");
+	    log.append("[" + nFiles + "] " + currentSide + " ");
 
-            MediaFile media = new MediaFile(file, attr.size(), checkSum, contentType);
-            data.add(media);
-            sleep(500);
+	    if (attr.isSymbolicLink()) {
+		log.append("Symbolic link: " + file);
+	    } else if (attr.isRegularFile()) {
+		log.append("Regular file: " + file);
+	    } else {
+		log.append("Other: " + file);
+	    }
+	    String contentType = Files.probeContentType(file);
+	    String checkSum = checksum(file.toFile());
+	    log.append(" (" + attr.size() + " bytes) "
+		    + "Type: " + ((contentType == null) ? "unknown" : contentType));
+	    log.append(" MD5=" + checkSum + "\n");
+	    logger.finer(log.toString());
+	    
+	    /**
+	     * **** for testing... System.out.print(" MD2 =" + checksum(file.toFile(),"MD2") + "\n"); System.out.print("
+	     * SHA-1 =" + checksum(file.toFile(),"SHA-1") + "\n"); System.out.print(" SHA-256=" +
+	     * checksum(file.toFile(),"SHA-256") + "\n"); System.out.print(" SHA-384=" +
+	     * checksum(file.toFile(),"SHA-384") + "\n"); System.out.print(" SHA-512=" +
+	     * checksum(file.toFile(),"SHA-512") + "\n");
+            ****
+	     */
 
-            nFiles++;
-            return CONTINUE;
-        }
+	    String key = getKey(file.toString());
+	    if (map.containsKey(key)) {
+		TableRow media = map.get(key);
+		media.setFile2Attributes(attr.size(), checkSum);
+	    } else {
+		TableRow media = new TableRow(key, attr.size(), checkSum, contentType, currentSide);
+		TableRow prev = map.put(key, media);
+	    }
 
-        public int getNumberProcessedFiles() {
-            return nFiles;
-        }
+	    nFiles++;
+	    return CONTINUE;
+	}
 
-        public int getNumberProcessedDirectories() {
-            return nDirs;
-        }
+	public int getNumberProcessedFiles() {
+	    return nFiles;
+	}
 
-        // Print each directory visited.
-        @Override
-        public FileVisitResult postVisitDirectory(Path dir,
-                IOException exc) {
-            System.out.format("Directory %d: %s%n", nDirs, dir);
-            nDirs++;
-            return CONTINUE;
-        }
+	public int getNumberProcessedDirectories() {
+	    return nDirs;
+	}
 
-        /**
-         * If there is some error accessing the file, let the user know. If you
-         * don't override this method and an error occurs, an IOException is
-         * thrown.
-         *
-         * @param file - reference to file with error
-         * @param exc - IO exception
-         * @return the visit result
-         */
-        @Override
-        public FileVisitResult visitFileFailed(Path file,
-                IOException exc) {
-            System.err.println(exc);
-            return CONTINUE;
-        }
+	// Print each directory visited.
+	@Override
+	public FileVisitResult postVisitDirectory(Path dir,
+		IOException exc) {
+	    logger.fine("Directory " + nDirs + ": " + dir);
+	    nDirs++;
+	    return CONTINUE;
+	}
 
+	/**
+	 * If there is some error accessing the file, let the user know. If you don't override this method and an error
+	 * occurs, an IOException is thrown.
+	 *
+	 * @param file - reference to file with error
+	 * @param exc - IO exception
+	 * @return the visit result
+	 */
+	@Override
+	public FileVisitResult visitFileFailed(Path file,
+		IOException ex) {
+	    logger.log(Level.SEVERE, "Error while navigating " + file, ex);
+	    return CONTINUE;
+	}
+
+	private String getKey(String fullpath) {
+	    String key;
+	    if (currentSide == Side.LEFT) {
+		logger.finest("fullpath=" + fullpath + " side=" + currentSide + " rootDir=" + root1Dir);
+		key = fullpath.substring(root1Dir.toString().length()+1);
+	    } else {
+		logger.finest("fullpath=" + fullpath + " side=" + currentSide + " rootDir=" + root2Dir);
+		key = fullpath.substring(root2Dir.toString().length()+1);
+	    }
+	    logger.finest("\tkey="+key);
+	    return key;
+	}
     }
 
     private void sleep(long miliSecs) {
@@ -330,95 +492,68 @@ public class MultiMediaChecker extends Application {
     }
 
     static public String checksum(File file) {
-        try {
-            java.security.MessageDigest md5er;
-            try (InputStream fin = new FileInputStream(file)) {
-                md5er = MessageDigest.getInstance("MD5");  // MD5, or CRC32
-                byte[] buffer = new byte[1024];
-                int read;
-                do {
-                    read = fin.read(buffer);
-                    if (read > 0) {
-                        md5er.update(buffer, 0, read);
-                    }
-                } while (read != -1);
-            }
-            byte[] digest = md5er.digest();
-            if (digest == null) {
-                return null;
-            }
-            String strDigest = "0x";
-            for (int i = 0; i < digest.length; i++) {
-                strDigest += Integer.toString((digest[i] & 0xff)
-                        + 0x100, 16).substring(1).toUpperCase();
-            }
-            return strDigest;
-        } catch (IOException | NoSuchAlgorithmException e) {
-            System.out.println("Error:");
-            e.printStackTrace();
-            return null;
-        }
+	return checksum(file, "MD5");
     }
 
     /**
-     * Class holding table data. Each row contains a file.
+     * Checksum of a file contents based on different algorithms. This will read the <it>entire</it> file.
+     *
+     * @param file The file
+     * @param algorithm Algorithm used for building checksum: "MD2","MD5","SHA-1","SHA-256","SHA-384","SHA-512"
+     * @return Hex checksum string starting with "0x<it>&lt;hex_value&gt;</it>"
      */
-    public static class MediaFile {
-
-        public SimpleStringProperty fileName = new SimpleStringProperty();
-        public SimpleStringProperty fileType = new SimpleStringProperty();
-        public SimpleStringProperty checksum = new SimpleStringProperty();
-        public SimpleLongProperty size = new SimpleLongProperty();
-
-        public MediaFile() {
-        }
-
-        public MediaFile(String fileName) {
-            this.fileName.set(fileName);
-        }
-
-        public MediaFile(Path file) {
-            this.fileName = new SimpleStringProperty(file.toString());
-        }
-
-        public MediaFile(Path file, long size, String checkSum, String fileType) {
-            this.fileName.set(file.toString());
-            this.size.set(size);
-            this.checksum.set(checkSum);
-            this.fileType.set(fileType);
-        }
-
-        public String getFileName() {
-            return this.fileName.get();
-        }
-
-        public void setFileName(String fileName) {
-            this.fileName.set(fileName);
-        }
-
-        public String getFileType() {
-            return fileType.get();
-        }
-
-        public void setFileType(String fileType) {
-            this.fileType.set(fileType);
-        }
-
-        public String getChecksum() {
-            return this.checksum.get();
-        }
-
-        public void setChecksum(String checksum) {
-            this.checksum.set(checksum);
-        }
-
-        public Long getSize() {
-            return size.get();
-        }
-
-        public void setSize(long size) {
-            this.size.set(size);
-        }
+    static public String checksum(File file, String algorithm) {
+	try {
+	    java.security.MessageDigest msgDigest;
+	    try (InputStream fin = new FileInputStream(file)) {
+		msgDigest = MessageDigest.getInstance(algorithm);
+		byte[] buffer = new byte[1024];
+		int read;
+		do {
+		    read = fin.read(buffer);
+		    if (read > 0) {
+			msgDigest.update(buffer, 0, read);
+		    }
+		} while (read != -1);
+	    }
+	    byte[] digest = msgDigest.digest();
+	    if (digest == null) {
+		return null;
+	    }
+	    String strDigest = "0x";
+	    for (int i = 0; i < digest.length; i++) {
+		strDigest += Integer.toString((digest[i] & 0xff)
+			+ 0x100, 16).substring(1).toUpperCase();
+	    }
+	    return strDigest;
+	} catch (IOException | NoSuchAlgorithmException e) {
+	    System.out.println("Error:");
+	    e.printStackTrace();
+	    return null;
+	}
     }
 
+    private void configureLogging(Level level) {
+	// removing all default handlers
+	Handler handlers[] = logger.getHandlers();
+	System.out.println("Number of logger handlers: " + handlers.length + " useParentHandler=" + logger.getUseParentHandlers());
+	logger.setUseParentHandlers(false);
+
+	for (Handler handler : handlers) {
+	    System.out.println("Removing log handler: " + handler.toString() + "...");
+	    logger.removeHandler(handler);
+	}
+
+	ConsoleHandler handler = new ConsoleHandler();
+	handler.setLevel(level);
+	handler.setFormatter(new SimpleFormatter() {
+	    @Override
+	    public synchronized String format(LogRecord record) {
+		return String.format("%1$-7.7s %2$-20.20s: %3$s\n", record.getLevel(), record.getSourceMethodName(),record.getMessage());
+	    }
+	});
+
+	logger.addHandler(handler);
+	logger.setLevel(level);
+    }
 }
