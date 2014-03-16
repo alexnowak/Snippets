@@ -21,6 +21,10 @@ import java.nio.file.attribute.BasicFileAttributes;
 import java.nio.file.attribute.FileTime;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.text.ParseException;
+import java.text.SimpleDateFormat;
+import java.util.Comparator;
+import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -33,14 +37,18 @@ import java.util.logging.Logger;
 import java.util.logging.SimpleFormatter;
 import javafx.application.Application;
 import javafx.beans.property.SimpleLongProperty;
+import javafx.beans.property.SimpleObjectProperty;
 import javafx.beans.property.SimpleStringProperty;
+import javafx.beans.value.ObservableValue;
 import javafx.collections.FXCollections;
 import javafx.event.ActionEvent;
 import javafx.event.EventHandler;
+import javafx.geometry.Insets;
 import javafx.scene.Scene;
 import javafx.scene.control.Button;
 import javafx.scene.control.Label;
 import javafx.scene.control.TableColumn;
+import javafx.scene.control.TableColumn.CellDataFeatures;
 import javafx.scene.control.TableView;
 import javafx.scene.control.TextField;
 import javafx.scene.control.cell.PropertyValueFactory;
@@ -50,6 +58,7 @@ import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
 import javafx.stage.DirectoryChooser;
 import javafx.stage.Stage;
+import javafx.util.Callback;
 
 /**
  *
@@ -269,6 +278,30 @@ public class MultiMediaChecker extends Application {
 	//colStatus.setPrefWidth(250);
 	colStatus.setCellValueFactory(new PropertyValueFactory("status"));
 
+	TableColumn<Date, String> colCreationDate1 = new TableColumn<Date, String>("Date");
+	colCreationDate1.setComparator(new Comparator<String>() {
+	    @Override
+	    public int compare(String t, String t1) {
+		try {
+		    SimpleDateFormat format = new SimpleDateFormat("MM-dd-YYYY");
+		    Date d1 = format.parse(t);
+		    Date d2 = format.parse(t1);
+		    return Long.compare(d1.getTime(), d2.getTime());
+		} catch (ParseException p) {
+		    p.printStackTrace();
+		}
+		return -1;
+	    }
+	});
+
+	colCreationDate1.setCellValueFactory(new Callback<CellDataFeatures<Date, String>, ObservableValue<String>>() {
+	    @Override
+	    public ObservableValue<String> call(CellDataFeatures<Date, String> param) {
+		SimpleDateFormat format = new SimpleDateFormat("MM-dd-YYYY");
+		return new SimpleObjectProperty(format.format(param.getValue()));
+	    }
+	});
+
 	table.getColumns().addAll(colFileName, colType, colChecksum1, colSize1, colStatus, colChecksum2, colSize2);
 
 	return table;
@@ -318,6 +351,16 @@ public class MultiMediaChecker extends Application {
 
 		    setRootDir(Side.LEFT, dir1Field.getText());
 		    setRootDir(Side.RIGHT, dir2Field.getText());
+		    
+		    if (getRootDir(true).toAbsolutePath().toString().indexOf(getRootDir(false).toAbsolutePath().toString()) != -1 ||
+			getRootDir(false).toAbsolutePath().toString().indexOf(getRootDir(true).toAbsolutePath().toString()) != -1 ) {
+			// TODO: Display warning dialog
+			String msg = "Paths are within the same branch. Dosne't make sense, eh?";
+			logger.warning(msg);
+			statusBar.setText("Paths are within the same branch. Dosne't make sense, eh?");
+			return;
+		    }
+			
 
 		    statusBar.setText("Searching dir1: " + dir1Field.getText() + " ...");
 		    navigateDirs(root1Dir, Side.LEFT);
@@ -374,6 +417,7 @@ public class MultiMediaChecker extends Application {
 	HBox.setHgrow(dir2Field, Priority.ALWAYS);
 	controls.getChildren().addAll(startBtn, dir1Field, dirBtn1, dir2Field, dirBtn2, newBtn, clearBtn);
 	controls.setSpacing(10);
+	controls.setPadding(new Insets(10));
 
 	this.resultTable = createTable();
 
@@ -382,9 +426,11 @@ public class MultiMediaChecker extends Application {
 	AnchorPane.setRightAnchor(resultTable, 10.0);
 	AnchorPane.setBottomAnchor(resultTable, 10.0);
 
-	VBox vbox = new VBox(3);
+	VBox vbox = new VBox();
 	VBox.setVgrow(resultTable, Priority.ALWAYS);
 	vbox.getChildren().addAll(controls, resultTable, statusBar);
+	vbox.setPadding(new Insets(10));
+	
 
 	scene = new Scene(vbox);
 
