@@ -30,7 +30,6 @@ import javafx.stage.Stage;
 import javafx.util.Callback;
 
 
-
 /**
  * Editable TableView with dynamic row
  * 

@@ -28,7 +28,6 @@ import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.TimeUnit;
 import java.util.logging.ConsoleHandler;
 import java.util.logging.Handler;
 import java.util.logging.Level;
@@ -61,6 +60,7 @@ import javafx.stage.Stage;
 import javafx.util.Callback;
 
 /**
+ * Compare 2 directories. Determine checksum of each file.
  *
  * @author Alex
  */
@@ -107,10 +107,10 @@ public class MultiMediaChecker extends Application {
 		setRootDir(side, dir.getAbsolutePath());
 		if (side == Side.LEFT) {
 		    dir1Field.setText(root1Dir.toString());
-		    statusBar.setText("New " + side + " root dir: " + root1Dir.toString());
+		    displayMessage("New " + side + " root dir: " + root1Dir.toString());
 		} else {
 		    dir2Field.setText(root2Dir.toString());
-		    statusBar.setText("New " + side + " root dir: " + root2Dir.toString());
+		    displayMessage("New " + side + " root dir: " + root2Dir.toString());
 		}
 	    } catch (IOException e) {
 		logger.log(Level.SEVERE, "Error with selected dir: " + dir.getAbsolutePath(), e);
@@ -135,8 +135,12 @@ public class MultiMediaChecker extends Application {
 	public SimpleStringProperty status = new SimpleStringProperty("");
 
 	protected Side side;
-	private FileTime creationTime;
-	private FileTime lastAccessTime;
+	private Date creationTime1;
+	private Date lastAccessTime1;
+	public SimpleStringProperty creationTimeString1 = new SimpleStringProperty("");
+	private Date creationTime2;
+	private Date lastAccessTime2;
+	public SimpleStringProperty creationTimeString2 = new SimpleStringProperty("");
 
 	public TableRow() {
 	}
@@ -147,16 +151,43 @@ public class MultiMediaChecker extends Application {
 	    setSide(side);
 	    setFileType(fileType);
 
-	    this.creationTime = creationTime;
-	    this.lastAccessTime = lastAccessTime;
-
 	    if (side == Side.LEFT) {
 		setSize1(size);
 		setChecksum1(checkSum);
+		this.creationTime1 = new Date(creationTime.toMillis());
+		this.lastAccessTime1 = new Date(lastAccessTime.toMillis());
+		setCreationTimeString1(formatDate(this.creationTime1));
 	    } else {
 		setSize2(size);
 		setChecksum2(checkSum);
+		this.creationTime2 = new Date(creationTime.toMillis());
+		this.lastAccessTime2 = new Date(lastAccessTime.toMillis());
+		setCreationTimeString1(formatDate(this.creationTime2));
 	    }
+	}
+
+	public Date getCreationTime1() {
+	    return this.creationTime1;
+	}
+
+	public Date getLastAccessTime1() {
+	    return this.lastAccessTime1;
+	}
+
+	public Date getLastAccessTime2() {
+	    return this.lastAccessTime2;
+	}
+
+	public Date getCreationTime2() {
+	    return this.creationTime2;
+	}
+
+	public void setCreationTimeString1(String creationTime) {
+	    this.creationTimeString1.set(creationTime);
+	}
+
+	public void setCreationTimeString2(String creationTime) {
+	    this.creationTimeString2.set(creationTime);
 	}
 
 	public Side getSide() {
@@ -218,10 +249,14 @@ public class MultiMediaChecker extends Application {
 	    this.size2.set(size);
 	}
 
-	private void setFile2Attributes(long size, String checkSum) {
+	private void setFile2Attributes(long size, String checkSum,
+		FileTime creationTime, FileTime lastAccessTime) {
 	    this.side = Side.BOTH;
 	    setSize2(size);
 	    setChecksum2(checkSum);
+	    this.creationTime2 = new Date(creationTime.toMillis());
+	    this.lastAccessTime2 = new Date(lastAccessTime.toMillis());
+	    setCreationTimeString1(new SimpleDateFormat("dd-MM-yyyy HH:mm:ss").format(this.creationTime2));
 	}
 
 	public String getStatus() {
@@ -232,7 +267,6 @@ public class MultiMediaChecker extends Application {
 		case RIGHT:
 		    return "LEFT MISSING";
 	    }
-
 	    // File exists in both directories, check for identity.
 	    boolean identical = (getSize1() == getSize2()) && (getChecksum1().compareTo(getChecksum2()) == 0);
 	    this.status.set(identical ? "EQUAL" : "DIFFERENT");
@@ -275,34 +309,41 @@ public class MultiMediaChecker extends Application {
 	colChecksum2.setCellValueFactory(new PropertyValueFactory("checksum2"));
 
 	TableColumn<TableRow, String> colStatus = new TableColumn<>("Status");
-	//colStatus.setPrefWidth(250);
+	colStatus.setPrefWidth(100);
 	colStatus.setCellValueFactory(new PropertyValueFactory("status"));
 
-	TableColumn<Date, String> colCreationDate1 = new TableColumn<Date, String>("Date");
+	TableColumn<TableRow, String> colCreationDate1 = new TableColumn<>("Date1");
+	colCreationDate1.setPrefWidth(125);
 	colCreationDate1.setComparator(new Comparator<String>() {
 	    @Override
-	    public int compare(String t, String t1) {
-		try {
-		    SimpleDateFormat format = new SimpleDateFormat("MM-dd-YYYY");
-		    Date d1 = format.parse(t);
-		    Date d2 = format.parse(t1);
-		    return Long.compare(d1.getTime(), d2.getTime());
-		} catch (ParseException p) {
-		    p.printStackTrace();
-		}
-		return -1;
+	    public int compare(String t0, String t1) {
+		return compareDates(t0, t1);
 	    }
 	});
-
-	colCreationDate1.setCellValueFactory(new Callback<CellDataFeatures<Date, String>, ObservableValue<String>>() {
+	colCreationDate1.setCellValueFactory(new Callback<CellDataFeatures<TableRow, String>, ObservableValue<String>>() {
 	    @Override
-	    public ObservableValue<String> call(CellDataFeatures<Date, String> param) {
-		SimpleDateFormat format = new SimpleDateFormat("MM-dd-YYYY");
-		return new SimpleObjectProperty(format.format(param.getValue()));
+	    public ObservableValue<String> call(CellDataFeatures<TableRow, String> param) {
+		return new SimpleObjectProperty(formatDate(param.getValue().getLastAccessTime1()));
 	    }
 	});
 
-	table.getColumns().addAll(colFileName, colType, colChecksum1, colSize1, colStatus, colChecksum2, colSize2);
+	TableColumn<TableRow, String> colCreationDate2 = new TableColumn<>("Date2");
+	colCreationDate2.setPrefWidth(130);
+	colCreationDate2.setComparator(new Comparator<String>() {
+	    @Override
+	    public int compare(String t0, String t1) {
+		return compareDates(t0, t1);
+	    }
+	});
+	colCreationDate2.setCellValueFactory(new Callback<CellDataFeatures<TableRow, String>, ObservableValue<String>>() {
+	    @Override
+	    public ObservableValue<String> call(CellDataFeatures<TableRow, String> param) {
+		return new SimpleObjectProperty(formatDate(param.getValue().getLastAccessTime2()));
+	    }
+	});
+
+	table.getColumns().addAll(colFileName, colType, colChecksum1, colSize1, colCreationDate1, colStatus,
+		colChecksum2, colSize2, colCreationDate2);
 
 	return table;
     }
@@ -340,7 +381,7 @@ public class MultiMediaChecker extends Application {
 	}
 
 	statusBar.setMaxWidth(Double.MAX_VALUE);
-	statusBar.setText("LEFT DIR: " + root1Dir.toString() + " RIGHT DIR: " + root2Dir.toString());
+	displayMessage("LEFT DIR: " + root1Dir.toString() + " RIGHT DIR: " + root2Dir.toString());
 
 	Button startBtn = new Button("Start");
 	startBtn.setOnAction(new EventHandler<ActionEvent>() {
@@ -351,20 +392,19 @@ public class MultiMediaChecker extends Application {
 
 		    setRootDir(Side.LEFT, dir1Field.getText());
 		    setRootDir(Side.RIGHT, dir2Field.getText());
-		    
-		    if (getRootDir(true).toAbsolutePath().toString().indexOf(getRootDir(false).toAbsolutePath().toString()) != -1 ||
-			getRootDir(false).toAbsolutePath().toString().indexOf(getRootDir(true).toAbsolutePath().toString()) != -1 ) {
+
+		    if (getRootDir(true).toAbsolutePath().toString().indexOf(getRootDir(false).toAbsolutePath().toString()) != -1
+			    || getRootDir(false).toAbsolutePath().toString().indexOf(getRootDir(true).toAbsolutePath().toString()) != -1) {
 			// TODO: Display warning dialog
-			String msg = "Paths are within the same branch. Dosne't make sense, eh?";
+			String msg = "Paths are within the same branch. Dosen't make sense, eh?";
 			logger.warning(msg);
-			statusBar.setText("Paths are within the same branch. Dosne't make sense, eh?");
+			displayMessage(msg);
 			return;
 		    }
-			
 
-		    statusBar.setText("Searching dir1: " + dir1Field.getText() + " ...");
+		    displayMessage("Searching dir1: " + dir1Field.getText() + " ...");
 		    navigateDirs(root1Dir, Side.LEFT);
-		    statusBar.setText("Searching dir2: " + dir2Field.getText() + " ...");
+		    displayMessage("Searching dir2: " + dir2Field.getText() + " ...");
 		    navigateDirs(root2Dir, Side.RIGHT);
 
 		    logger.info("Number of items in map: " + map.size());
@@ -380,7 +420,7 @@ public class MultiMediaChecker extends Application {
 	newBtn.setOnAction(new EventHandler<ActionEvent>() {
 	    @Override
 	    public void handle(ActionEvent event) {
-		statusBar.setText("Adding table row");
+		displayMessage("Adding table row");
 		map.put("/aaa/aaa/aaa", new TableRow("/aaa/aaa/aaa", 1000, "aaa", "aaa", Side.LEFT,
 			FileTime.fromMillis(System.currentTimeMillis()), FileTime.fromMillis(System.currentTimeMillis())));
 		map.put("/bbb/bbb/bbb", new TableRow("/bbb/bbb/bbb", 1000, "bbb", "bbb", Side.RIGHT,
@@ -394,7 +434,7 @@ public class MultiMediaChecker extends Application {
 
 	    @Override
 	    public void handle(ActionEvent event) {
-		statusBar.setText("Clearing table...");
+		displayMessage("Clearing table...");
 		map.clear();
 		resultTable.getItems().clear();
 	    }
@@ -430,7 +470,6 @@ public class MultiMediaChecker extends Application {
 	VBox.setVgrow(resultTable, Priority.ALWAYS);
 	vbox.getChildren().addAll(controls, resultTable, statusBar);
 	vbox.setPadding(new Insets(10));
-	
 
 	scene = new Scene(vbox);
 
@@ -475,7 +514,7 @@ public class MultiMediaChecker extends Application {
 	}
 	logger.info("======================================================");
 
-	statusBar.setText("DONE! " + pf.getNumberProcessedDirectories() + " dirs, "
+	displayMessage("DONE! " + pf.getNumberProcessedDirectories() + " dirs, "
 		+ pf.getNumberProcessedFiles() + " files");
     }
 
@@ -505,7 +544,7 @@ public class MultiMediaChecker extends Application {
 	    String checkSum = checksum(file.toFile());
 	    log.append(" (" + attr.size() + " bytes) "
 		    + "Type: " + ((contentType == null) ? "unknown" : contentType));
-	    log.append(" MD5=" + checkSum + "\n");
+	    log.append(" MD5=" + checkSum + " " + attr.lastModifiedTime() + " " + attr.creationTime() + "\n");
 	    logger.finer(log.toString());
 
 	    /**
@@ -518,10 +557,10 @@ public class MultiMediaChecker extends Application {
 	    String key = getKey(file.toString());
 	    if (map.containsKey(key)) {
 		TableRow media = map.get(key);
-		media.setFile2Attributes(attr.size(), checkSum);
+		media.setFile2Attributes(attr.size(), checkSum, attr.lastModifiedTime(), attr.lastModifiedTime());
 	    } else {
 		TableRow media = new TableRow(key, attr.size(), checkSum, contentType, currentSide,
-			attr.creationTime(), attr.lastModifiedTime());
+			attr.lastModifiedTime(), attr.lastModifiedTime());
 		TableRow prev = map.put(key, media);
 	    }
 	    nFiles++;
@@ -536,10 +575,14 @@ public class MultiMediaChecker extends Application {
 	    return nDirs;
 	}
 
-	// Print each directory visited.
+	/**
+	 * Print each directory visited.
+	 * @param dir The directory
+	 * @param exc Exception
+	 * @return 
+	 */
 	@Override
-	public FileVisitResult postVisitDirectory(Path dir,
-		IOException exc) {
+	public FileVisitResult postVisitDirectory(Path dir, IOException exc) {
 	    logger.fine("Directory " + nDirs + ": " + dir);
 	    nDirs++;
 	    return CONTINUE;
@@ -554,8 +597,7 @@ public class MultiMediaChecker extends Application {
 	 * @return the visit result
 	 */
 	@Override
-	public FileVisitResult visitFileFailed(Path file,
-		IOException ex) {
+	public FileVisitResult visitFileFailed(Path file, IOException ex) {
 	    logger.log(Level.SEVERE, "Error while navigating " + file, ex);
 	    return CONTINUE;
 	}
@@ -618,10 +660,41 @@ public class MultiMediaChecker extends Application {
 	    }
 	    return strDigest;
 	} catch (IOException | NoSuchAlgorithmException e) {
-	    System.out.println("Error:");
-	    e.printStackTrace();
+	    String msg = "Error building checksum of " + file.getAbsolutePath();
+	    logger.log(Level.SEVERE, msg, e);
 	    return null;
 	}
+    }
+
+    static public int compareDates(String t0, String t1) {
+	if ((t0 == null || t0.isEmpty()) && (t1 == null || t1.isEmpty())) {
+	    return 0;  // t0 == t1
+	}
+	if ((t0 == null || t0.isEmpty()) && (t1 != null && !t1.isEmpty())) {
+	    return -1; // t0 > t1
+	}
+	if ((t0 != null && !t0.isEmpty()) && (t1 == null || t1.isEmpty())) {
+	    return 1; // t0 < t1
+	}
+	try {
+	    SimpleDateFormat format = new SimpleDateFormat("MM/dd/YYYY HH:mm:ss");
+	    Date d1 = format.parse(t0);
+	    Date d2 = format.parse(t1);
+	    return Long.compare(d1.getTime(), d2.getTime());
+	} catch (ParseException p) {
+	    logger.log(Level.INFO, "Date parse exception (t0=" + t0 + ",t1=" + t1 + ")", p);
+	}
+	return 0;
+    }
+
+    static public String formatDate(Date date) {
+	String dateString = "";
+	if (date != null) {
+	    SimpleDateFormat format = new SimpleDateFormat("MM/dd/YYYY HH:mm:ss");
+	    dateString = format.format(date);
+	}
+	//logger.finer("CreationDate: " + dateString);
+	return dateString;
     }
 
     private void configureLogging(Level level) {
@@ -646,5 +719,9 @@ public class MultiMediaChecker extends Application {
 
 	logger.addHandler(handler);
 	logger.setLevel(level);
+    }
+
+    public void displayMessage(String msg) {
+	statusBar.setText(msg);
     }
 }
