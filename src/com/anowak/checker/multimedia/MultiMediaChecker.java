@@ -5,6 +5,7 @@
  */
 package com.anowak.checker.multimedia;
 
+import java.io.BufferedInputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
@@ -67,6 +68,7 @@ import javafx.util.Callback;
 public class MultiMediaChecker extends Application {
 
     static final Logger logger = Logger.getLogger(MultiMediaChecker.class.getName());
+    private long totalTime;
 
     enum Side {
 
@@ -499,12 +501,18 @@ public class MultiMediaChecker extends Application {
 
     private void navigateDirs(Path rootDir, Side side) throws IOException {
 	logger.info("Getting list of " + side + " files ...");
+	long startTime = System.currentTimeMillis();
+
 
 	this.currentSide = side;
 
 	PrintFiles pf = new PrintFiles();
 	Files.walkFileTree(rootDir, pf);
 
+	long stopTime = System.currentTimeMillis();
+	totalTime = stopTime-startTime;
+
+	
 	logger.info("======================================================");
 	logger.info("= Dir: " + rootDir);
 	logger.info("= Statistics: " + pf.getNumberProcessedDirectories()
@@ -515,13 +523,23 @@ public class MultiMediaChecker extends Application {
 	logger.info("======================================================");
 
 	displayMessage("DONE! " + pf.getNumberProcessedDirectories() + " dirs, "
-		+ pf.getNumberProcessedFiles() + " files");
+		+ pf.getNumberProcessedFiles() + " files processed in " + totalTime/1000.0 + " seconds");
     }
 
     private class PrintFiles extends SimpleFileVisitor<Path> {
+	int nFiles = 0;
+	int nDirs = 0;
+	private MessageDigest msgDigest=null;
+	private long msecs;
 
-	private int nFiles = 0;
-	private int nDirs = 0;
+    private MessageDigest getMessageDigest(String algorithm) throws NoSuchAlgorithmException {
+	if (msgDigest!=null) {
+	    msgDigest.reset();
+	    return msgDigest;
+	}
+	msgDigest = MessageDigest.getInstance(algorithm);
+	return msgDigest;
+    }
 
 	// Print information about
 	// each type of file.
@@ -561,7 +579,7 @@ public class MultiMediaChecker extends Application {
 	    } else {
 		TableRow media = new TableRow(key, attr.size(), checkSum, contentType, currentSide,
 			attr.lastModifiedTime(), attr.lastModifiedTime());
-		TableRow prev = map.put(key, media);
+		map.put(key, media);
 	    }
 	    nFiles++;
 	    return CONTINUE;
@@ -583,7 +601,7 @@ public class MultiMediaChecker extends Application {
 	 */
 	@Override
 	public FileVisitResult postVisitDirectory(Path dir, IOException exc) {
-	    logger.fine("Directory " + nDirs + ": " + dir);
+	    logger.fine("#"+nDirs + " Directory: " + dir);
 	    nDirs++;
 	    return CONTINUE;
 	}
@@ -614,6 +632,62 @@ public class MultiMediaChecker extends Application {
 	    logger.finest("\tkey=" + key);
 	    return key;
 	}
+	
+	public String checksum(File file) {
+	    return checksum(file, "MD5");
+	}
+
+	/**
+	 * Checksum of a file contents based on different algorithms. This will read the <it>entire</it> file.
+	 *
+	 * @param file The file
+	 * @param algorithm Algorithm used for building checksum: "MD2","MD5","SHA-1","SHA-256","SHA-384","SHA-512"
+	 * @return Hex checksum string starting with "0x<it>&lt;hex_value&gt;</it>"
+	 */
+	public String checksum(File file, String algorithm) {
+	    try {
+		try (BufferedInputStream fin = new BufferedInputStream(new FileInputStream(file))) {
+		    MessageDigest msgDigest = getMessageDigest(algorithm);
+		    byte[] buffer = new byte[1024];
+		    int read;
+		    startTimer();
+		    long size=0;
+		    do {
+			read = fin.read(buffer);
+			if (read > 0) {
+			    size++;
+			    msgDigest.update(buffer, 0, read);
+			}
+		    } while (read != -1);
+		    stopTimer(file.length());
+		}
+		byte[] digest = msgDigest.digest();
+		if (digest == null) {
+		    return null;
+		}
+		String strDigest = "0x";
+		for (int i = 0; i < digest.length; i++) {
+		    strDigest += Integer.toString((digest[i] & 0xff)
+			    + 0x100, 16).substring(1).toUpperCase();
+		}
+		return strDigest;
+	    } catch (IOException | NoSuchAlgorithmException e) {
+		String msg = "Error building checksum of " + file.getAbsolutePath();
+		logger.log(Level.SEVERE, msg, e);
+		return null;
+	    }
+	}
+
+	private void startTimer() {
+	    msecs = System.currentTimeMillis();
+	}
+
+	private void stopTimer(long size) {
+	    long curTime = System.currentTimeMillis();
+	    double durationInSec = (curTime*1.0 - msecs*1.0)/1000.0;
+	    double speed = (size/1.0E6)/durationInSec;
+	    logger.fine("Duration: " + durationInSec + " sec, Size: " + size/1.0E6 + " MB,  Speed: " + speed + " MB/s");
+	}
     }
 
     private void sleep(long miliSecs) {
@@ -622,48 +696,6 @@ public class MultiMediaChecker extends Application {
 //        } catch (InterruptedException ex) {
 //            logger.log(Level.SEVERE, "Sleep exception: ", ex);
 //        }
-    }
-
-    static public String checksum(File file) {
-	return checksum(file, "MD5");
-    }
-
-    /**
-     * Checksum of a file contents based on different algorithms. This will read the <it>entire</it> file.
-     *
-     * @param file The file
-     * @param algorithm Algorithm used for building checksum: "MD2","MD5","SHA-1","SHA-256","SHA-384","SHA-512"
-     * @return Hex checksum string starting with "0x<it>&lt;hex_value&gt;</it>"
-     */
-    static public String checksum(File file, String algorithm) {
-	try {
-	    java.security.MessageDigest msgDigest;
-	    try (InputStream fin = new FileInputStream(file)) {
-		msgDigest = MessageDigest.getInstance(algorithm);
-		byte[] buffer = new byte[1024];
-		int read;
-		do {
-		    read = fin.read(buffer);
-		    if (read > 0) {
-			msgDigest.update(buffer, 0, read);
-		    }
-		} while (read != -1);
-	    }
-	    byte[] digest = msgDigest.digest();
-	    if (digest == null) {
-		return null;
-	    }
-	    String strDigest = "0x";
-	    for (int i = 0; i < digest.length; i++) {
-		strDigest += Integer.toString((digest[i] & 0xff)
-			+ 0x100, 16).substring(1).toUpperCase();
-	    }
-	    return strDigest;
-	} catch (IOException | NoSuchAlgorithmException e) {
-	    String msg = "Error building checksum of " + file.getAbsolutePath();
-	    logger.log(Level.SEVERE, msg, e);
-	    return null;
-	}
     }
 
     static public int compareDates(String t0, String t1) {
