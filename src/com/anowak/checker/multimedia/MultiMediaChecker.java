@@ -16,6 +16,7 @@ import java.nio.file.FileVisitResult;
 import static java.nio.file.FileVisitResult.CONTINUE;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
+import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.nio.file.SimpleFileVisitor;
 import java.nio.file.attribute.BasicFileAttributes;
@@ -126,7 +127,6 @@ public class MultiMediaChecker extends Application {
     public static class TableRow {
 
 	public SimpleStringProperty fileName = new SimpleStringProperty();
-	public SimpleStringProperty fileType = new SimpleStringProperty();
 
 	public SimpleStringProperty checksum1 = new SimpleStringProperty("");
 	public SimpleLongProperty size1 = new SimpleLongProperty(-1L);
@@ -147,11 +147,10 @@ public class MultiMediaChecker extends Application {
 	public TableRow() {
 	}
 
-	public TableRow(String fileName, long size, String checkSum, String fileType, Side side,
+	public TableRow(String fileName, long size, String checkSum, Side side,
 		FileTime creationTime, FileTime lastAccessTime) {
 	    setFileName(fileName);
 	    setSide(side);
-	    setFileType(fileType);
 
 	    if (side == Side.LEFT) {
 		setSize1(size);
@@ -207,14 +206,6 @@ public class MultiMediaChecker extends Application {
 
 	public String getFileName() {
 	    return this.fileName.get();
-	}
-
-	public String getFileType() {
-	    return fileType.get();
-	}
-
-	public final void setFileType(String fileType) {
-	    this.fileType.set(fileType);
 	}
 
 	// left side
@@ -373,17 +364,22 @@ public class MultiMediaChecker extends Application {
 
 	List<String> params = getParameters().getRaw();
 
-	if (params.size() != 2) {
-	    logger.info("Usage: java com.anowak.checker.multimedia.MultiMediaChecker <rootDir1> <rootDir2>");
-	    setRootDir(Side.LEFT, ".");
-	    setRootDir(Side.RIGHT, ".");
-	} else {
-	    setRootDir(Side.LEFT, params.get(0));
-	    setRootDir(Side.RIGHT, params.get(1));
+	try {
+	    if (params.size() != 2) {
+		logger.info("Usage: java com.anowak.checker.multimedia.MultiMediaChecker <rootDir1> <rootDir2>");
+		setRootDir(Side.LEFT, ".");
+		setRootDir(Side.RIGHT, ".");
+		displayMessage("LEFT DIR: " + root1Dir.toString() + " RIGHT DIR: " + root2Dir.toString());
+	    } else {
+		setRootDir(Side.LEFT, params.get(0));
+		setRootDir(Side.RIGHT, params.get(1));
+		displayMessage("LEFT DIR: " + root1Dir.toString() + " RIGHT DIR: " + root2Dir.toString());
+	    }
+	} catch (NoSuchFileException e) {
+	    displayMessage(e.getMessage() + " not found or not accessible");
 	}
 
 	statusBar.setMaxWidth(Double.MAX_VALUE);
-	displayMessage("LEFT DIR: " + root1Dir.toString() + " RIGHT DIR: " + root2Dir.toString());
 
 	Button startBtn = new Button("Start");
 	startBtn.setOnAction(new EventHandler<ActionEvent>() {
@@ -423,9 +419,9 @@ public class MultiMediaChecker extends Application {
 	    @Override
 	    public void handle(ActionEvent event) {
 		displayMessage("Adding table row");
-		map.put("/aaa/aaa/aaa", new TableRow("/aaa/aaa/aaa", 1000, "aaa", "aaa", Side.LEFT,
+		map.put("/aaa/aaa/aaa", new TableRow("/aaa/aaa/aaa", 1000, "aaa",  Side.LEFT,
 			FileTime.fromMillis(System.currentTimeMillis()), FileTime.fromMillis(System.currentTimeMillis())));
-		map.put("/bbb/bbb/bbb", new TableRow("/bbb/bbb/bbb", 1000, "bbb", "bbb", Side.RIGHT,
+		map.put("/bbb/bbb/bbb", new TableRow("/bbb/bbb/bbb", 1000, "bbb", Side.RIGHT,
 			FileTime.fromMillis(System.currentTimeMillis()), FileTime.fromMillis(System.currentTimeMillis())));
 
 	    }
@@ -503,16 +499,14 @@ public class MultiMediaChecker extends Application {
 	logger.info("Getting list of " + side + " files ...");
 	long startTime = System.currentTimeMillis();
 
-
 	this.currentSide = side;
 
 	PrintFiles pf = new PrintFiles();
 	Files.walkFileTree(rootDir, pf);
 
 	long stopTime = System.currentTimeMillis();
-	totalTime = stopTime-startTime;
+	totalTime = stopTime - startTime;
 
-	
 	logger.info("======================================================");
 	logger.info("= Dir: " + rootDir);
 	logger.info("= Statistics: " + pf.getNumberProcessedDirectories()
@@ -523,23 +517,24 @@ public class MultiMediaChecker extends Application {
 	logger.info("======================================================");
 
 	displayMessage("DONE! " + pf.getNumberProcessedDirectories() + " dirs, "
-		+ pf.getNumberProcessedFiles() + " files processed in " + totalTime/1000.0 + " seconds");
+		+ pf.getNumberProcessedFiles() + " files processed in " + totalTime / 1000.0 + " seconds");
     }
 
     private class PrintFiles extends SimpleFileVisitor<Path> {
+
 	int nFiles = 0;
 	int nDirs = 0;
-	private MessageDigest msgDigest=null;
+	private MessageDigest msgDigest = null;
 	private long msecs;
 
-    private MessageDigest getMessageDigest(String algorithm) throws NoSuchAlgorithmException {
-	if (msgDigest!=null) {
-	    msgDigest.reset();
+	private MessageDigest getMessageDigest(String algorithm) throws NoSuchAlgorithmException {
+	    if (msgDigest != null) {
+		msgDigest.reset();
+		return msgDigest;
+	    }
+	    msgDigest = MessageDigest.getInstance(algorithm);
 	    return msgDigest;
 	}
-	msgDigest = MessageDigest.getInstance(algorithm);
-	return msgDigest;
-    }
 
 	// Print information about
 	// each type of file.
@@ -551,6 +546,7 @@ public class MultiMediaChecker extends Application {
 
 	    log.append("[" + nFiles + "] " + currentSide + " ");
 
+	    /****
 	    if (attr.isSymbolicLink()) {
 		log.append("Symbolic link: " + file);
 	    } else if (attr.isRegularFile()) {
@@ -559,10 +555,11 @@ public class MultiMediaChecker extends Application {
 		log.append("Other: " + file);
 	    }
 	    String contentType = Files.probeContentType(file);
+	    *****/
+	    
 	    String checkSum = checksum(file.toFile());
-	    log.append(" (" + attr.size() + " bytes) "
-		    + "Type: " + ((contentType == null) ? "unknown" : contentType));
-	    log.append(" MD5=" + checkSum + " " + attr.lastModifiedTime() + " " + attr.creationTime() + "\n");
+	    log.append("\""+file + "\" " + attr.size() + " bytes, MD5=" + checkSum + " " 
+		    + attr.lastModifiedTime() + " " + attr.creationTime() + "\n");
 	    logger.finer(log.toString());
 
 	    /**
@@ -577,7 +574,7 @@ public class MultiMediaChecker extends Application {
 		TableRow media = map.get(key);
 		media.setFile2Attributes(attr.size(), checkSum, attr.lastModifiedTime(), attr.lastModifiedTime());
 	    } else {
-		TableRow media = new TableRow(key, attr.size(), checkSum, contentType, currentSide,
+		TableRow media = new TableRow(key, attr.size(), checkSum, currentSide,
 			attr.lastModifiedTime(), attr.lastModifiedTime());
 		map.put(key, media);
 	    }
@@ -595,13 +592,14 @@ public class MultiMediaChecker extends Application {
 
 	/**
 	 * Print each directory visited.
+	 *
 	 * @param dir The directory
 	 * @param exc Exception
-	 * @return 
+	 * @return
 	 */
 	@Override
 	public FileVisitResult postVisitDirectory(Path dir, IOException exc) {
-	    logger.fine("#"+nDirs + " Directory: " + dir);
+	    logger.fine("#" + nDirs + " Directory: " + dir);
 	    nDirs++;
 	    return CONTINUE;
 	}
@@ -632,7 +630,7 @@ public class MultiMediaChecker extends Application {
 	    logger.finest("\tkey=" + key);
 	    return key;
 	}
-	
+
 	public String checksum(File file) {
 	    return checksum(file, "MD5");
 	}
@@ -651,7 +649,7 @@ public class MultiMediaChecker extends Application {
 		    byte[] buffer = new byte[1024];
 		    int read;
 		    startTimer();
-		    long size=0;
+		    long size = 0;
 		    do {
 			read = fin.read(buffer);
 			if (read > 0) {
@@ -684,18 +682,19 @@ public class MultiMediaChecker extends Application {
 
 	private void stopTimer(long size) {
 	    long curTime = System.currentTimeMillis();
-	    double durationInSec = (curTime*1.0 - msecs*1.0)/1000.0;
-	    double speed = (size/1.0E6)/durationInSec;
-	    logger.fine("Duration: " + durationInSec + " sec, Size: " + size/1.0E6 + " MB,  Speed: " + speed + " MB/s");
-	}
-    }
+	    double durationInSec = (curTime * 1.0 - msecs * 1.0) / 1000.0;
 
-    private void sleep(long miliSecs) {
-//        try {
-//            Thread.sleep(miliSecs);
-//        } catch (InterruptedException ex) {
-//            logger.log(Level.SEVERE, "Sleep exception: ", ex);
-//        }
+	    if (durationInSec > 1E-15) {
+		double speed = (size / 1.0E6) / durationInSec;
+		if (speed < 1.0 && size > 1E6) {
+		    logger.fine("==================== SLOW =============================================================");
+		    logger.fine("=== Duration: " + durationInSec + " sec, Size: " + size / 1.0E6 + " MB,  Speed: " + speed + " MB/s ===========");
+		    logger.fine("=======================================================================================");
+		} else
+		    logger.fine("Duration: " + durationInSec + " sec, Size: " + size / 1.0E6 + " MB,  Speed: " + speed + " MB/s");
+	    } else
+		logger.fine("Duration: " + durationInSec + " sec, Size: " + size / 1.0E6 + " MB,  Speed: --TOODFAST--");
+	}
     }
 
     static public int compareDates(String t0, String t1) {
@@ -754,6 +753,7 @@ public class MultiMediaChecker extends Application {
     }
 
     public void displayMessage(String msg) {
+	logger.info(msg);
 	statusBar.setText(msg);
     }
 }
