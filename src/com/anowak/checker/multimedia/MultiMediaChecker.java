@@ -5,11 +5,10 @@
  */
 package com.anowak.checker.multimedia;
 
-import java.io.BufferedInputStream;
 import java.io.File;
-import java.io.FileInputStream;
 import java.io.IOException;
-import java.io.InputStream;
+import java.nio.ByteBuffer;
+import java.nio.channels.ReadableByteChannel;
 import java.nio.file.FileSystem;
 import java.nio.file.FileSystems;
 import java.nio.file.FileVisitResult;
@@ -19,6 +18,7 @@ import java.nio.file.LinkOption;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.nio.file.SimpleFileVisitor;
+import static java.nio.file.StandardOpenOption.READ;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.nio.file.attribute.FileTime;
 import java.security.MessageDigest;
@@ -27,6 +27,7 @@ import java.text.ParseException;
 import java.text.SimpleDateFormat;
 import java.util.Comparator;
 import java.util.Date;
+import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -42,6 +43,7 @@ import javafx.beans.property.SimpleObjectProperty;
 import javafx.beans.property.SimpleStringProperty;
 import javafx.beans.value.ObservableValue;
 import javafx.collections.FXCollections;
+import javafx.collections.ObservableList;
 import javafx.event.ActionEvent;
 import javafx.event.EventHandler;
 import javafx.geometry.Insets;
@@ -419,10 +421,18 @@ public class MultiMediaChecker extends Application {
 	    @Override
 	    public void handle(ActionEvent event) {
 		displayMessage("Adding table row");
-		map.put("/aaa/aaa/aaa", new TableRow("/aaa/aaa/aaa", 1000, "aaa",  Side.LEFT,
-			FileTime.fromMillis(System.currentTimeMillis()), FileTime.fromMillis(System.currentTimeMillis())));
-		map.put("/bbb/bbb/bbb", new TableRow("/bbb/bbb/bbb", 1000, "bbb", Side.RIGHT,
-			FileTime.fromMillis(System.currentTimeMillis()), FileTime.fromMillis(System.currentTimeMillis())));
+		ObservableList<TableRow> items = resultTable.getItems();
+		items.add(new TableRow("/aaa/aaa/aaa", 1000, "aaa",
+			Side.LEFT,FileTime.fromMillis(System.currentTimeMillis()),
+			FileTime.fromMillis(System.currentTimeMillis())));
+		items.add(new TableRow("/bbb/bbb/bbb", 1000, "bbb", 
+			Side.RIGHT,FileTime.fromMillis(System.currentTimeMillis()),
+			FileTime.fromMillis(System.currentTimeMillis())));
+//		map.put("/aaa/aaa/aaa", new TableRow("/aaa/aaa/aaa", 1000, "aaa",  Side.LEFT,
+//			FileTime.fromMillis(System.currentTimeMillis()), FileTime.fromMillis(System.currentTimeMillis())));
+//		map.put("/bbb/bbb/bbb", new TableRow("/bbb/bbb/bbb", 1000, "bbb", Side.RIGHT,
+//			FileTime.fromMillis(System.currentTimeMillis()), FileTime.fromMillis(System.currentTimeMillis())));
+//		    resultTable.setItems(FXCollections.observableArrayList(map.values()));
 
 	    }
 	});
@@ -557,7 +567,7 @@ public class MultiMediaChecker extends Application {
 	    String contentType = Files.probeContentType(file);
 	    *****/
 	    
-	    String checkSum = checksum(file.toFile());
+	    String checkSum = checksum(file);
 	    log.append("\""+file + "\" " + attr.size() + " bytes, MD5=" + checkSum + " " 
 		    + attr.lastModifiedTime() + " " + attr.creationTime() + "\n");
 	    logger.finer(log.toString());
@@ -631,7 +641,7 @@ public class MultiMediaChecker extends Application {
 	    return key;
 	}
 
-	public String checksum(File file) {
+	public String checksum(Path file) {
 	    return checksum(file, "MD5");
 	}
 
@@ -642,23 +652,27 @@ public class MultiMediaChecker extends Application {
 	 * @param algorithm Algorithm used for building checksum: "MD2","MD5","SHA-1","SHA-256","SHA-384","SHA-512"
 	 * @return Hex checksum string starting with "0x<it>&lt;hex_value&gt;</it>"
 	 */
-	public String checksum(File file, String algorithm) {
+	public String checksum(Path file, String algorithm) {
 	    try {
-		try (BufferedInputStream fin = new BufferedInputStream(new FileInputStream(file))) {
-		    MessageDigest msgDigest = getMessageDigest(algorithm);
-		    byte[] buffer = new byte[1024];
-		    int read;
-		    startTimer();
-		    long size = 0;
-		    do {
-			read = fin.read(buffer);
-			if (read > 0) {
-			    size++;
-			    msgDigest.update(buffer, 0, read);
-			}
-		    } while (read != -1);
-		    stopTimer(file.length());
+		msgDigest = getMessageDigest(algorithm);
+		// open file for reading
+		ByteBuffer buf = ByteBuffer.allocate(100000000); // 10 MB
+		
+		ReadableByteChannel rbc = Files.newByteChannel(file, EnumSet.of(READ));
+		
+		buf.clear();
+
+		startTimer();
+		int nRead = rbc.read(buf);
+		while (nRead > 0) {
+		  //  logger.fine("   Number of byres read: "+nRead);
+		    msgDigest.update(buf.array(), 0, nRead);
+		    buf.clear();
+		    nRead = rbc.read(buf);
 		}
+		stopTimer(file.toFile().length());
+		rbc.close();
+		
 		byte[] digest = msgDigest.digest();
 		if (digest == null) {
 		    return null;
@@ -669,11 +683,13 @@ public class MultiMediaChecker extends Application {
 			    + 0x100, 16).substring(1).toUpperCase();
 		}
 		return strDigest;
-	    } catch (IOException | NoSuchAlgorithmException e) {
-		String msg = "Error building checksum of " + file.getAbsolutePath();
+	    } catch ( IOException | NoSuchAlgorithmException e) {
+		String msg = "Error building checksum of " + file;
 		logger.log(Level.SEVERE, msg, e);
 		return null;
 	    }
+		
+	    
 	}
 
 	private void startTimer() {
